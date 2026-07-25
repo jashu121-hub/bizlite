@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { usePathname } from 'next/navigation'
 import * as React from 'react'
 import {
@@ -11,9 +12,14 @@ import {
   X,
 } from 'lucide-react'
 
-import { QuickAddModal } from '@/components/layout/quick-add-modal'
 import { useQuickAdd, type QuickAddType } from '@/components/layout/quick-add-context'
 import { cn } from '@/lib/utils'
+
+// Keep heavy sale/expense/product forms out of the initial app shell bundle
+const QuickAddModal = dynamic(
+  () => import('@/components/layout/quick-add-modal').then((mod) => mod.QuickAddModal),
+  { ssr: false },
+)
 
 const ACTIONS: Array<{
   type: QuickAddType

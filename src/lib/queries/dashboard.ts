@@ -142,11 +142,8 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     periodSales,
     periodExpenses,
     products,
-    recentSales,
-    recentExpenses,
     pendingAgg,
     pendingSalesAll,
-    pendingSales,
     todaySalesRowsRaw,
   ] = await Promise.all([
     sumSales(userId, dashboardRange.startDate, dashboardRange.endDate),
@@ -175,9 +172,8 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         invoiceNumber: true,
         paymentStatus: true,
         customer: { select: { name: true } },
-        items: { select: { productName: true, lineTotal: true } },
       },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.expense.findMany({
       where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
@@ -188,7 +184,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         category: { select: { name: true } },
         description: true,
       },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.product.findMany({
       where: { userId, isActive: true },
@@ -200,18 +196,6 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         costPrice: true,
       },
     }),
-    prisma.sale.findMany({
-      where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      take: 5,
-      include: { customer: { select: { name: true } } },
-    }),
-    prisma.expense.findMany({
-      where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      take: 5,
-      include: { category: { select: { name: true } } },
-    }),
     prisma.sale.aggregate({
       where: pendingWhere,
       _sum: { balancePending: true },
@@ -221,12 +205,6 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       select: saleSummarySelect,
       orderBy: { date: 'asc' },
     }),
-    prisma.sale.findMany({
-      where: pendingWhere,
-      include: { customer: true },
-      orderBy: { date: 'asc' },
-      take: 8,
-    }),
     isCurrentMonthView
       ? prisma.sale.findMany({
           where: { userId, date: { gte: todayStart, lte: endOfDay(new Date()) } },
@@ -235,6 +213,10 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         })
       : Promise.resolve(null),
   ])
+
+  // Derive list widgets from period rows — avoids duplicate DB round-trips
+  const recentSales = periodSales.slice(0, 5)
+  const recentExpenses = periodExpenses.slice(0, 5)
 
   const resolvedTodaySales = todaySales ?? periodSalesAgg
   const todaySalesRows = todaySalesRowsRaw
@@ -403,7 +385,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     recentSales,
     recentExpenses,
     lowStock,
-    pendingCustomers: pendingSales,
+    pendingCustomers: pendingSalesAll.slice(0, 8),
     charts: {
       salesVsExpenses: [
         { name: 'Sales', value: periodRevenue },

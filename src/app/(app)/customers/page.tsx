@@ -5,21 +5,36 @@ import { requireProfile } from '@/lib/auth'
 import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { CustomersTable } from './customers-table'
+import { moneyNumber } from '@/lib/money'
 
 export default async function CustomersPage() {
   const { user, profile } = await requireProfile()
-  const customers = await prisma.customer.findMany({
-    where: { userId: user.id },
-    include: { sales: { select: { balancePending: true } } },
-    orderBy: { name: 'asc' },
-  })
+  const [customers, outstandingByCustomer] = await Promise.all([
+    prisma.customer.findMany({
+      where: { userId: user.id },
+      select: { id: true, name: true, phone: true, email: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.sale.groupBy({
+      by: ['customerId'],
+      where: { userId: user.id, customerId: { not: null }, balancePending: { gt: 0 } },
+      _sum: { balancePending: true },
+    }),
+  ])
+
+  const outstandingMap = new Map(
+    outstandingByCustomer.map((row) => [
+      row.customerId!,
+      moneyNumber(row._sum.balancePending || 0),
+    ]),
+  )
 
   const rows = customers.map((c) => ({
     id: c.id,
     name: c.name,
     phone: c.phone,
     email: c.email,
-    outstanding: c.sales.reduce((sum, sale) => sum + Number(sale.balancePending), 0),
+    outstanding: outstandingMap.get(c.id) ?? 0,
   }))
 
   return (

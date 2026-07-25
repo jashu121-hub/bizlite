@@ -60,21 +60,34 @@ export async function ensureExpenseCategories(userId: string, tx: Db = prisma) {
 
 export async function listExpenseCategories(
   userId: string,
-  options: { includeArchived?: boolean; activeOnlyForForms?: boolean } = {},
+  options: {
+    includeArchived?: boolean
+    activeOnlyForForms?: boolean
+    /** Skip expense usage aggregates (faster for dropdowns/forms). */
+    skipUsageStats?: boolean
+  } = {},
 ): Promise<ExpenseCategoryDTO[]> {
   await ensureExpenseCategories(userId)
+  const skipUsage = options.skipUsageStats || options.activeOnlyForForms
   const categories = await prisma.expenseCategoryItem.findMany({
     where: { userId, ...(options.includeArchived ? {} : { isArchived: false }) },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
   })
-  const grouped = await prisma.expense.groupBy({
-    by: ['categoryId'],
-    where: { userId },
-    _count: { _all: true },
-    _sum: { amount: true },
-  })
-  const usage = new Map(grouped.map((row) => [row.categoryId, { count: row._count._all, amount: Number(row._sum.amount ?? 0) }]))
-  const asDto = (category: typeof categories[number]): ExpenseCategoryDTO => ({
+  const grouped = skipUsage
+    ? []
+    : await prisma.expense.groupBy({
+        by: ['categoryId'],
+        where: { userId },
+        _count: { _all: true },
+        _sum: { amount: true },
+      })
+  const usage = new Map(
+    grouped.map((row) => [
+      row.categoryId,
+      { count: row._count._all, amount: Number(row._sum.amount ?? 0) },
+    ]),
+  )
+  const asDto = (category: (typeof categories)[number]): ExpenseCategoryDTO => ({
     ...category,
     expenseCount: usage.get(category.id)?.count ?? 0,
     expenseAmount: usage.get(category.id)?.amount ?? 0,

@@ -1,7 +1,4 @@
-import { Suspense } from 'react'
-
 import { ReportsShell } from '@/components/reports/reports-shell'
-import { Skeleton } from '@/components/ui/skeleton'
 import { requireProfile } from '@/lib/auth'
 import type { DateFilterPreset } from '@/lib/dates'
 import { getReportsData } from '@/lib/queries/reports'
@@ -37,24 +34,7 @@ export default async function ReportsPage({
     month: params.month,
   })
 
-  return (
-    <Suspense fallback={<ReportsLoadingSkeleton />}>
-      <ReportsShell data={reports} currency={profile.currency} initialTab={tab} />
-    </Suspense>
-  )
-}
-
-function ReportsLoadingSkeleton() {
-  return (
-    <div className="space-y-4">
-      <Skeleton className="h-24 w-full" />
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-20 w-full" />
-        ))}
-      </div>
-      <Skeleton className="h-10 w-full" />
-      <Skeleton className="h-64 w-full" />
-    </div>
-  )
+  // Suspense around client shell only aids hydration; data is already loaded above.
+  // Route-level loading.tsx covers navigation feedback.
+  return <ReportsShell data={reports} currency={profile.currency} initialTab={tab} />
 }

@@ -18,6 +18,21 @@ export default async function ProductsPage({
 
   const products = await prisma.product.findMany({
     where: { userId: user.id },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      sku: true,
+      currentStock: true,
+      lowStockLevel: true,
+      openingStock: true,
+      costPrice: true,
+      sellingPrice: true,
+      notes: true,
+      costBreakdown: true,
+      isActive: true,
+      updatedAt: true,
+    },
     orderBy: { name: 'asc' },
   })
 
@@ -66,7 +81,7 @@ export default async function ProductsPage({
         emptyDescription={
           stock === 'low'
             ? 'All products are above their alert levels.'
-            : 'Add products before recording sales.'
+            : 'Add your first product to start tracking inventory.'
         }
       />
     </div>

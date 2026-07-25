@@ -30,4 +30,5 @@ export const prisma =
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   })
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+// Reuse the client across hot reloads and serverless invocations in the same isolate
+globalForPrisma.prisma = prisma

@@ -1,12 +1,21 @@
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   AlertTriangle,
   CheckCircle2,
   Plus,
 } from 'lucide-react'
-import { DashboardCharts } from './dashboard-charts'
 import { DashboardDateFilter } from './dashboard-date-filter'
 import { DashboardKpiCards } from './dashboard-kpi-cards'
+
+const DashboardCharts = dynamic(
+  () => import('./dashboard-charts').then((mod) => mod.DashboardCharts),
+  {
+    loading: () => (
+      <div className="h-72 animate-pulse rounded-2xl border border-zinc-200 bg-zinc-100" />
+    ),
+  },
+)
 import { StatusBadge } from '@/components/shared/status-badge'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { Button } from '@/components/ui/button'

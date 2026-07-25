@@ -4,6 +4,7 @@ import withPWAInit from '@ducanh2912/next-pwa'
 const withPWA = withPWAInit({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development',
+  // Register after the page is interactive so first paint is not blocked
   register: true,
   fallbacks: {
     document: '/offline',
@@ -18,6 +19,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // next-pwa injects a webpack config; keep an empty turbopack block for Next 16 compatibility.
   turbopack: {},
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'date-fns', 'recharts'],
+  },
 }
 
 export default withPWA(nextConfig)
