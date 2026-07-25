@@ -83,7 +83,12 @@ export function ProductSelector({
           ) : error ? (
             <div className="px-3 py-2 text-sm text-red-600">{error}</div>
           ) : options.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-zinc-500">No products available</div>
+            <div className="space-y-1 px-3 py-2 text-sm text-zinc-500">
+              <p>No active products available.</p>
+              <p className="text-xs">
+                Archived products stay on the Products page but cannot be sold until restored.
+              </p>
+            </div>
           ) : (
             options.map((product) => {
               const outOfStock = product.currentStock <= 0

@@ -87,6 +87,9 @@ export function ProductsTable({
             <div className="min-w-0">
               <ProductNameButton product={p} currency={currency} />
               <p className="text-sm text-zinc-500">{p.category}</p>
+              <p className={cn('mt-1 text-xs font-medium', p.isActive ? 'text-emerald-600' : 'text-amber-700')}>
+                {p.isActive ? 'Active' : 'Archived — not available in New Sale'}
+              </p>
             </div>
             <ProductActions product={p} currency={currency} compact />
           </div>

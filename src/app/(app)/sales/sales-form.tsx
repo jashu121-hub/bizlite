@@ -225,6 +225,13 @@ export function SalesForm({
           </p>
         ) : null}
 
+        {!productsLoading && !productsError && products.length === 0 ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            No active products available. On the Products page, restore/activate a product (Archived
+            items cannot be sold).
+          </p>
+        ) : null}
+
         {itemsArray.fields.map((line, index) => {
           const productId = form.watch(`items.${index}.productId`) as string
           const product = products.find((item) => item.id === productId)
