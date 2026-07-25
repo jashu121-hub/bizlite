@@ -2,17 +2,11 @@ import Link from 'next/link'
 import {
   AlertTriangle,
   CheckCircle2,
-  Package,
   Plus,
-  ReceiptText,
-  ShoppingCart,
-  TrendingDown,
-  TrendingUp,
-  UserPlus,
-  Wallet,
 } from 'lucide-react'
 import { DashboardCharts } from './dashboard-charts'
 import { DashboardDateFilter } from './dashboard-date-filter'
+import { DashboardKpiCards } from './dashboard-kpi-cards'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { Button } from '@/components/ui/button'
@@ -20,7 +14,6 @@ import { requireProfile } from '@/lib/auth'
 import { getDashboardData } from '@/lib/queries/dashboard'
 import { type DateFilterPreset, formatDate } from '@/lib/dates'
 import { expenseCategoryLabel } from '@/lib/labels'
-import { cn } from '@/lib/utils'
 
 const presets = new Set<DateFilterPreset>(['month', 'ytd', 'year', 'lifetime', 'custom'])
 
@@ -34,24 +27,6 @@ function timeGreeting() {
   if (hour < 12) return 'Good morning'
   if (hour < 17) return 'Good afternoon'
   return 'Good evening'
-}
-
-function Trend({ value }: { value: number | null | undefined }) {
-  if (value === null || value === undefined) return null
-  const up = value >= 0
-  const Icon = up ? TrendingUp : TrendingDown
-  return (
-    <span
-      className={cn(
-        'mt-2 inline-flex items-center gap-1 text-xs font-medium',
-        up ? 'text-emerald-600' : 'text-red-500',
-      )}
-    >
-      <Icon className="h-3.5 w-3.5" />
-      {up ? '+' : ''}
-      {value.toFixed(0)}% vs last period
-    </span>
-  )
 }
 
 export default async function DashboardPage({
@@ -71,40 +46,53 @@ export default async function DashboardPage({
 
   const kpis = [
     {
+      type: 'todaySales' as const,
       label: "Today's Sales",
       value: data.cards.todaySales,
       trend: data.cards.trends.todaySales,
-      hint: 'vs yesterday',
+      summary: data.kpiSummaries.todaySales,
     },
     {
+      type: 'monthSales' as const,
       label: 'This Month Sales',
       value: data.cards.monthSales,
       trend: data.cards.trends.monthSales,
+      summary: data.kpiSummaries.monthSales,
     },
     {
+      type: 'monthExpenses' as const,
       label: 'This Month Expenses',
       value: data.cards.monthExpenses,
       trend: data.cards.trends.monthExpenses,
+      summary: data.kpiSummaries.monthExpenses,
     },
     {
+      type: 'netProfit' as const,
       label: 'Net Profit',
       value: data.cards.netProfit,
       trend: data.cards.trends.netProfit,
       danger: data.cards.netProfit < 0,
+      summary: data.kpiSummaries.netProfit,
     },
     {
+      type: 'pendingPayments' as const,
       label: 'Pending Payments',
       value: data.cards.pendingPayments,
+      summary: data.kpiSummaries.pendingPayments,
     },
     {
+      type: 'stockValue' as const,
       label: 'Stock Value',
       value: data.cards.stockValue,
+      summary: data.kpiSummaries.stockValue,
     },
     {
+      type: 'lowStock' as const,
       label: 'Low Stock Items',
       value: data.cards.lowStockCount,
       isCount: true,
       ok: data.cards.lowStockCount === 0,
+      summary: data.kpiSummaries.lowStock,
     },
   ]
 
@@ -138,33 +126,7 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
-        {kpis.map((kpi) => (
-          <div
-            key={kpi.label}
-            className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm"
-          >
-            <p className="text-xs font-medium text-zinc-500">{kpi.label}</p>
-            <p
-              className={cn(
-                'mt-2 text-lg font-bold tracking-tight tabular-nums sm:text-xl',
-                kpi.danger ? 'text-red-600' : 'text-zinc-900',
-              )}
-            >
-              {kpi.isCount ? (
-                kpi.value
-              ) : (
-                <CurrencyDisplay value={kpi.value as number} currency={currency} />
-              )}
-            </p>
-            {kpi.isCount && kpi.ok ? (
-              <p className="mt-2 text-xs font-medium text-emerald-600">All good! 🎉</p>
-            ) : (
-              <Trend value={kpi.trend} />
-            )}
-          </div>
-        ))}
-      </section>
+      <DashboardKpiCards items={kpis} currency={currency} />
 
       <DashboardCharts charts={data.charts} currency={currency} />
 
@@ -276,36 +238,6 @@ export default async function DashboardPage({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-zinc-800">Quick Actions</h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          <QuickAction href="/sales/new" icon={ShoppingCart} label="Add Sale" />
-          <QuickAction href="/expenses/new" icon={Wallet} label="Add Expense" />
-          <QuickAction href="/products/new" icon={Package} label="Add Product" />
-          <QuickAction href="/customers/new" icon={UserPlus} label="Add Customer" />
-          <QuickAction href="/reports" icon={ReceiptText} label="View Reports" />
-        </div>
-      </section>
     </div>
-  )
-}
-
-function QuickAction({
-  href,
-  icon: Icon,
-  label,
-}: {
-  href: string
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 px-3 py-3 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:bg-teal-50/50 hover:text-teal-800"
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </Link>
   )
 }

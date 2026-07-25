@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { expenseCategoryLabel } from '@/lib/labels'
+import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
 function pctChange(current: number, previous: number): number | null {
   if (previous === 0) return current === 0 ? 0 : 100
@@ -46,6 +47,17 @@ async function sumExpenses(userId: string, from: Date, to?: Date): Promise<numbe
   })
   return moneyNumber(agg._sum.amount || 0)
 }
+
+const saleSummarySelect = {
+  id: true,
+  date: true,
+  totalAmount: true,
+  amountPaid: true,
+  balancePending: true,
+  invoiceNumber: true,
+  paymentStatus: true,
+  customer: { select: { name: true } },
+} as const
 
 export async function getDashboardData(
   userId: string,
@@ -112,12 +124,46 @@ export async function getDashboardData(
     orderBy: { createdAt: 'desc' },
     take: 5,
   })
+
+  const pendingWhere = {
+    userId,
+    balancePending: { gt: 0 },
+    customerId: { not: null },
+  } as const
+  const pendingAgg = await prisma.sale.aggregate({
+    where: pendingWhere,
+    _sum: { balancePending: true },
+  })
+  const pendingSalesAll = await prisma.sale.findMany({
+    where: pendingWhere,
+    select: saleSummarySelect,
+    orderBy: { date: 'asc' },
+  })
   const pendingSales = await prisma.sale.findMany({
-    where: { userId, balancePending: { gt: 0 }, customerId: { not: null } },
+    where: pendingWhere,
     include: { customer: true },
     orderBy: { date: 'asc' },
     take: 8,
   })
+
+  const todaySalesRows = await prisma.sale.findMany({
+    where: { userId, date: { gte: todayStart } },
+    select: saleSummarySelect,
+    orderBy: { createdAt: 'desc' },
+  })
+  const monthSalesRows = await prisma.sale.findMany({
+    where: { userId, date: { gte: monthStart, lte: monthEnd } },
+    select: saleSummarySelect,
+    orderBy: { date: 'desc' },
+  })
+  const monthExpenseRows =
+    preset === 'month'
+      ? periodExpenses
+      : await prisma.expense.findMany({
+          where: { userId, date: { gte: monthStart, lte: monthEnd } },
+          select: { id: true, date: true, amount: true, category: true, description: true },
+          orderBy: { date: 'desc' },
+        })
 
   const todaySalesTotal = todaySales.total
   const yesterdaySalesTotal = yesterdaySales.total
@@ -133,7 +179,7 @@ export async function getDashboardData(
   const periodGross = moneyNumber(subMoney(periodRevenue, periodCogs))
   const periodExpenseTotal = moneyNumber(addMoney(...periodExpenses.map((e) => e.amount)))
   const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
-  const pendingPayments = moneyNumber(addMoney(...pendingSales.map((s) => s.balancePending)))
+  const pendingPayments = moneyNumber(pendingAgg._sum.balancePending || 0)
   const stockValue = moneyNumber(
     addMoney(...products.map((p) => money(p.costPrice).times(p.currentStock))),
   )
@@ -170,28 +216,49 @@ export async function getDashboardData(
     }
   })
 
+  const cards = {
+    todaySales: todaySalesTotal,
+    monthSales: monthSalesTotal,
+    monthExpenses: monthExpensesTotal,
+    grossProfit: monthGross,
+    netProfit: monthNet,
+    pendingPayments,
+    stockValue,
+    lowStockCount: lowStock.length,
+    periodRevenue,
+    periodExpenses: periodExpenseTotal,
+    periodGross,
+    periodNet,
+    trends: {
+      todaySales: pctChange(todaySalesTotal, yesterdaySalesTotal),
+      monthSales: pctChange(monthSalesTotal, prevMonthSales.total),
+      monthExpenses: pctChange(monthExpensesTotal, prevMonthExpensesTotal),
+      netProfit: pctChange(monthNet, prevMonthNet),
+    },
+  }
+
+  const kpiSummaries = buildKpiSummaries({
+    todaySalesRows,
+    monthSalesRows,
+    monthExpenseRows,
+    pendingSalesAll,
+    products,
+    cards,
+    monthSalesTotal,
+    prevMonthSalesTotal: prevMonthSales.total,
+    prevMonthExpensesTotal,
+    prevMonthNet,
+    monthLabel: format(new Date(), 'MMMM yyyy'),
+    todayLabel: format(new Date(), 'dd MMM yyyy'),
+    preset,
+    customFrom,
+    customTo,
+  })
+
   return {
     range,
-    cards: {
-      todaySales: todaySalesTotal,
-      monthSales: monthSalesTotal,
-      monthExpenses: monthExpensesTotal,
-      grossProfit: monthGross,
-      netProfit: monthNet,
-      pendingPayments,
-      stockValue,
-      lowStockCount: lowStock.length,
-      periodRevenue,
-      periodExpenses: periodExpenseTotal,
-      periodGross,
-      periodNet,
-      trends: {
-        todaySales: pctChange(todaySalesTotal, yesterdaySalesTotal),
-        monthSales: pctChange(monthSalesTotal, prevMonthSales.total),
-        monthExpenses: pctChange(monthExpensesTotal, prevMonthExpensesTotal),
-        netProfit: pctChange(monthNet, prevMonthNet),
-      },
-    },
+    cards,
+    kpiSummaries,
     recentSales,
     recentExpenses,
     lowStock,

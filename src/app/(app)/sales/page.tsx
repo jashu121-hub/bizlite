@@ -27,11 +27,16 @@ export default async function SalesPage({
   const q = params.q?.trim() || ''
   const status = params.status as PaymentStatus | undefined
   const customerId = params.customerId || undefined
+  const outstanding = params.outstanding === '1'
 
   const where: Prisma.SaleWhereInput = {
     userId: user.id,
     ...(dateFilter ? { date: dateFilter } : {}),
-    ...(status ? { paymentStatus: status } : {}),
+    ...(outstanding
+      ? { balancePending: { gt: 0 } }
+      : status
+        ? { paymentStatus: status }
+        : {}),
     ...(customerId ? { customerId } : {}),
     ...(q
       ? {

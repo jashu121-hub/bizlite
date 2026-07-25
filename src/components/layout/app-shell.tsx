@@ -2,6 +2,7 @@
 
 import { DesktopSidebar } from '@/components/layout/desktop-sidebar'
 import { MobileBottomNavigation } from '@/components/layout/mobile-bottom-nav'
+import { QuickAdd } from '@/components/layout/quick-add'
 import { OfflineBanner } from '@/components/shared/offline-banner'
 import { cn } from '@/lib/utils'
 
@@ -35,6 +36,7 @@ export function AppShell({ children, className, ownerName, email }: AppShellProp
         </main>
       </div>
 
+      <QuickAdd />
       <MobileBottomNavigation />
     </div>
   )

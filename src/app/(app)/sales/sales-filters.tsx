@@ -47,14 +47,23 @@ export function SalesFilters({
           placeholder="Search invoice or customer..."
         />
         <Select
-          value={params.get('status') || 'all'}
-          onValueChange={(v) => update({ status: v === 'all' ? null : v })}
+          value={
+            params.get('outstanding') === '1'
+              ? 'outstanding'
+              : params.get('status') || 'all'
+          }
+          onValueChange={(v) => {
+            if (v === 'all') update({ status: null, outstanding: null })
+            else if (v === 'outstanding') update({ status: null, outstanding: '1' })
+            else update({ status: v, outstanding: null })
+          }}
         >
           <SelectTrigger>
             <SelectValue placeholder="Payment status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="outstanding">Pending & Overdue</SelectItem>
             <SelectItem value="PAID">Paid</SelectItem>
             <SelectItem value="PARTIALLY_PAID">Partially Paid</SelectItem>
             <SelectItem value="PENDING">Pending</SelectItem>
