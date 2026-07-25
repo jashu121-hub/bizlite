@@ -2,27 +2,54 @@ import { format, startOfDay } from 'date-fns'
 import { expenseCategoryLabel } from '@/lib/labels'
 import { addMoney, money, moneyNumber, type MoneyInput } from '@/lib/money'
 import type { DateFilterPreset } from '@/lib/dates'
+import type { PeriodComparison } from '@/lib/dashboard-date-range'
 import type { KpiSummary, KpiType } from '@/lib/types/kpi'
 
-function pctChange(current: number, previous: number): number | null {
-  if (previous === 0) return current === 0 ? 0 : 100
-  return ((current - previous) / Math.abs(previous)) * 100
-}
-
-function formatPct(value: number | null, suffix = 'vs last period') {
-  if (value === null || value === undefined) return '—'
-  const sign = value > 0 ? '+' : ''
-  return `${sign}${value.toFixed(0)}% ${suffix}`
-}
-
-function reportsHref(preset: DateFilterPreset, from?: string | null, to?: string | null) {
+function reportsHref(
+  preset: DateFilterPreset,
+  from?: string | null,
+  to?: string | null,
+  year?: number,
+  month?: number,
+) {
   const sp = new URLSearchParams()
   sp.set('range', preset)
   if (preset === 'custom') {
     if (from) sp.set('from', from)
     if (to) sp.set('to', to)
+  } else if (preset !== 'lifetime') {
+    if (year) sp.set('year', String(year))
+    if (preset === 'month' && month) sp.set('month', String(month))
   }
   return `/reports?${sp.toString()}`
+}
+
+function listHref(
+  base: '/sales' | '/expenses',
+  preset: DateFilterPreset,
+  from?: string | null,
+  to?: string | null,
+  year?: number,
+  month?: number,
+) {
+  const sp = new URLSearchParams()
+  sp.set('preset', preset)
+  if (preset === 'custom') {
+    if (from) sp.set('from', from)
+    if (to) sp.set('to', to)
+  } else if (preset !== 'lifetime') {
+    if (year) sp.set('year', String(year))
+    if (preset === 'month' && month) sp.set('month', String(month))
+  }
+  return `${base}?${sp.toString()}`
+}
+
+function comparisonTone(
+  comparison: PeriodComparison,
+): 'default' | 'success' | 'danger' | 'warning' {
+  if (comparison.favourable === true) return 'success'
+  if (comparison.favourable === false) return 'danger'
+  return 'default'
 }
 
 type SaleRow = {
@@ -54,8 +81,8 @@ type ProductRow = {
 
 export function buildKpiSummaries(input: {
   todaySalesRows: SaleRow[]
-  monthSalesRows: SaleRow[]
-  monthExpenseRows: ExpenseRow[]
+  periodSalesRows: SaleRow[]
+  periodExpenseRows: ExpenseRow[]
   pendingSalesAll: SaleRow[]
   products: ProductRow[]
   cards: {
@@ -66,37 +93,48 @@ export function buildKpiSummaries(input: {
     pendingPayments: number
     stockValue: number
     lowStockCount: number
+    periodPaid: number
+    periodPending: number
+    periodInvoiceCount: number
     trends: {
-      todaySales: number | null
-      monthSales: number | null
-      monthExpenses: number | null
-      netProfit: number | null
+      todaySales: PeriodComparison
+      monthSales: PeriodComparison
+      monthExpenses: PeriodComparison
+      netProfit: PeriodComparison
     }
   }
-  monthSalesTotal: number
-  prevMonthSalesTotal: number
-  prevMonthExpensesTotal: number
-  prevMonthNet: number
-  monthLabel: string
-  todayLabel: string
-  preset: DateFilterPreset
+  periodSalesTotal: number
+  prevPeriodSalesTotal: number
+  prevPeriodExpensesTotal: number
+  prevPeriodNet: number
+  periodLabel: string
+  firstCardTitle: string
+  firstCardRangeLabel: string
+  salesTitle: string
+  expensesTitle: string
+  isTodayFirstCard: boolean
+  periodType: DateFilterPreset
   customFrom?: string | null
   customTo?: string | null
+  year?: number
+  month?: number
 }): Record<KpiType, KpiSummary> {
   const todayStart = startOfDay(new Date())
-  const todayPaid = moneyNumber(addMoney(...input.todaySalesRows.map((s) => s.amountPaid)))
-  const todayPending = moneyNumber(addMoney(...input.todaySalesRows.map((s) => s.balancePending)))
-  const todayCount = input.todaySalesRows.length
-  const todayAvg = todayCount > 0 ? input.cards.todaySales / todayCount : 0
+  const firstPaid = moneyNumber(addMoney(...input.todaySalesRows.map((s) => s.amountPaid)))
+  const firstPending = moneyNumber(
+    addMoney(...input.todaySalesRows.map((s) => s.balancePending)),
+  )
+  const firstCount = input.todaySalesRows.length
+  const firstAvg = firstCount > 0 ? input.cards.todaySales / firstCount : 0
 
-  const monthPaid = moneyNumber(addMoney(...input.monthSalesRows.map((s) => s.amountPaid)))
-  const monthPending = moneyNumber(addMoney(...input.monthSalesRows.map((s) => s.balancePending)))
-  const monthCount = input.monthSalesRows.length
-  const monthAvg = monthCount > 0 ? input.cards.monthSales / monthCount : 0
+  const periodPaid = input.cards.periodPaid
+  const periodPending = input.cards.periodPending
+  const periodCount = input.cards.periodInvoiceCount
+  const periodAvg = periodCount > 0 ? input.cards.monthSales / periodCount : 0
 
-  const expenseCount = input.monthExpenseRows.length
+  const expenseCount = input.periodExpenseRows.length
   const expenseByCategory = new Map<string, number>()
-  for (const exp of input.monthExpenseRows) {
+  for (const exp of input.periodExpenseRows) {
     const label = expenseCategoryLabel(exp.category as never)
     expenseByCategory.set(
       label,
@@ -112,12 +150,12 @@ export function buildKpiSummaries(input: {
     }))
     .sort((a, b) => b.amount - a.amount)
   const highestCategory = topCategories[0]
-  const highestExpense = [...input.monthExpenseRows].sort(
+  const highestExpense = [...input.periodExpenseRows].sort(
     (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
   )[0]
 
   const margin =
-    input.monthSalesTotal > 0 ? (input.cards.netProfit / input.monthSalesTotal) * 100 : 0
+    input.periodSalesTotal > 0 ? (input.cards.netProfit / input.periodSalesTotal) * 100 : 0
 
   const overdue = input.pendingSalesAll.filter((s) => startOfDay(s.date) < todayStart)
   const overdueAmount = moneyNumber(addMoney(...overdue.map((s) => s.balancePending)))
@@ -139,19 +177,42 @@ export function buildKpiSummaries(input: {
     .sort((a, b) => b.value - a.value)[0]
 
   const todayIso = format(new Date(), 'yyyy-MM-dd')
+  const salesDetails = input.isTodayFirstCard
+    ? `/sales?preset=custom&from=${todayIso}&to=${todayIso}`
+    : listHref(
+        '/sales',
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+      )
 
   return {
     todaySales: {
       type: 'todaySales',
-      title: "Today's Sales",
-      rangeLabel: input.todayLabel,
+      title: input.firstCardTitle,
+      rangeLabel: input.firstCardRangeLabel,
       primaryValue: input.cards.todaySales,
-      rows: [
-        { kind: 'count', label: 'Invoices', value: todayCount },
-        { kind: 'money', label: 'Paid amount', value: todayPaid, tone: 'success' },
-        { kind: 'money', label: 'Pending amount', value: todayPending, tone: 'warning' },
-        { kind: 'money', label: 'Average invoice', value: todayAvg },
-      ],
+      rows: input.isTodayFirstCard
+        ? [
+            { kind: 'count', label: 'Invoices', value: firstCount },
+            { kind: 'money', label: 'Paid amount', value: firstPaid, tone: 'success' },
+            { kind: 'money', label: 'Pending amount', value: firstPending, tone: 'warning' },
+            { kind: 'money', label: 'Average invoice', value: firstAvg },
+          ]
+        : [
+            { kind: 'count', label: 'Invoices', value: periodCount },
+            { kind: 'money', label: 'Paid amount', value: periodPaid, tone: 'success' },
+            { kind: 'money', label: 'Pending amount', value: periodPending, tone: 'warning' },
+            { kind: 'money', label: 'Average invoice', value: periodAvg },
+            {
+              kind: 'text',
+              label: 'vs previous period',
+              value: input.cards.trends.todaySales.label,
+              tone: comparisonTone(input.cards.trends.todaySales),
+            },
+          ],
       listTitle: 'Latest sales',
       listItems: input.todaySalesRows.slice(0, 3).map((s) => ({
         id: s.id,
@@ -160,36 +221,42 @@ export function buildKpiSummaries(input: {
         amount: moneyNumber(s.totalAmount),
         meta: format(s.date, 'dd MMM'),
       })),
-      emptyMessage: 'No sales recorded today.',
-      detailsHref: `/sales?preset=custom&from=${todayIso}&to=${todayIso}`,
+      emptyMessage: input.isTodayFirstCard
+        ? 'No sales recorded today.'
+        : 'No sales found for this period.',
+      detailsHref: salesDetails,
     },
     monthSales: {
       type: 'monthSales',
-      title: 'This Month Sales',
-      rangeLabel: input.monthLabel,
+      title: input.salesTitle,
+      rangeLabel: input.periodLabel,
       primaryValue: input.cards.monthSales,
       rows: [
-        { kind: 'count', label: 'Invoices', value: monthCount },
-        { kind: 'money', label: 'Paid sales', value: monthPaid, tone: 'success' },
-        { kind: 'money', label: 'Pending sales', value: monthPending, tone: 'warning' },
-        { kind: 'money', label: 'Average invoice', value: monthAvg },
+        { kind: 'count', label: 'Invoices', value: periodCount },
+        { kind: 'money', label: 'Paid sales', value: periodPaid, tone: 'success' },
+        { kind: 'money', label: 'Pending sales', value: periodPending, tone: 'warning' },
+        { kind: 'money', label: 'Average invoice', value: periodAvg },
         {
           kind: 'text',
-          label: 'vs previous month',
-          value: formatPct(pctChange(input.cards.monthSales, input.prevMonthSalesTotal)),
-          tone:
-            (pctChange(input.cards.monthSales, input.prevMonthSalesTotal) ?? 0) >= 0
-              ? 'success'
-              : 'danger',
+          label: 'vs previous period',
+          value: input.cards.trends.monthSales.label,
+          tone: comparisonTone(input.cards.trends.monthSales),
         },
       ],
-      emptyMessage: 'No sales recorded this month.',
-      detailsHref: '/sales?preset=month',
+      emptyMessage: 'No sales found for this period.',
+      detailsHref: listHref(
+        '/sales',
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+      ),
     },
     monthExpenses: {
       type: 'monthExpenses',
-      title: 'This Month Expenses',
-      rangeLabel: input.monthLabel,
+      title: input.expensesTitle,
+      rangeLabel: input.periodLabel,
       primaryValue: input.cards.monthExpenses,
       rows: [
         { kind: 'count', label: 'Expense entries', value: expenseCount },
@@ -214,28 +281,30 @@ export function buildKpiSummaries(input: {
         },
         {
           kind: 'text',
-          label: 'vs previous month',
-          value: formatPct(
-            pctChange(input.cards.monthExpenses, input.prevMonthExpensesTotal),
-          ),
-          tone:
-            (pctChange(input.cards.monthExpenses, input.prevMonthExpensesTotal) ?? 0) <= 0
-              ? 'success'
-              : 'danger',
+          label: 'vs previous period',
+          value: input.cards.trends.monthExpenses.label,
+          tone: comparisonTone(input.cards.trends.monthExpenses),
         },
       ],
       categories: topCategories.slice(0, 3),
-      emptyMessage: 'No expenses recorded this month.',
-      detailsHref: '/expenses?preset=month',
+      emptyMessage: 'No expenses found for this period.',
+      detailsHref: listHref(
+        '/expenses',
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+      ),
     },
     netProfit: {
       type: 'netProfit',
       title: 'Net Profit',
-      rangeLabel: input.monthLabel,
+      rangeLabel: input.periodLabel,
       primaryValue: input.cards.netProfit,
       primaryTone: input.cards.netProfit >= 0 ? 'success' : 'danger',
       rows: [
-        { kind: 'money', label: 'Total sales', value: input.monthSalesTotal },
+        { kind: 'money', label: 'Total sales', value: input.periodSalesTotal },
         { kind: 'money', label: 'Total expenses', value: input.cards.monthExpenses },
         {
           kind: 'money',
@@ -252,20 +321,23 @@ export function buildKpiSummaries(input: {
         {
           kind: 'text',
           label: 'vs previous period',
-          value: formatPct(pctChange(input.cards.netProfit, input.prevMonthNet)),
-          tone:
-            (pctChange(input.cards.netProfit, input.prevMonthNet) ?? 0) >= 0
-              ? 'success'
-              : 'danger',
+          value: input.cards.trends.netProfit.label,
+          tone: comparisonTone(input.cards.trends.netProfit),
         },
       ],
       emptyMessage: 'No profit data for this period.',
-      detailsHref: reportsHref(input.preset, input.customFrom, input.customTo),
+      detailsHref: reportsHref(
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+      ),
     },
     pendingPayments: {
       type: 'pendingPayments',
       title: 'Pending Payments',
-      rangeLabel: 'Outstanding',
+      rangeLabel: input.periodLabel,
       primaryValue: input.cards.pendingPayments,
       primaryTone: input.cards.pendingPayments > 0 ? 'warning' : 'success',
       rows: [
@@ -289,13 +361,20 @@ export function buildKpiSummaries(input: {
         meta: format(s.date, 'dd MMM'),
         tone: startOfDay(s.date) < todayStart ? 'danger' : 'warning',
       })),
-      emptyMessage: 'No pending payments.',
-      detailsHref: '/sales?outstanding=1&preset=lifetime',
+      emptyMessage: 'No pending payments for this period.',
+      detailsHref: `${listHref(
+        '/sales',
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+      )}&outstanding=1`,
     },
     stockValue: {
       type: 'stockValue',
       title: 'Stock Value',
-      rangeLabel: 'Inventory',
+      rangeLabel: 'Current',
       primaryValue: input.cards.stockValue,
       rows: [
         { kind: 'count', label: 'Total quantity', value: totalQty },
@@ -329,7 +408,7 @@ export function buildKpiSummaries(input: {
     lowStock: {
       type: 'lowStock',
       title: 'Low Stock Items',
-      rangeLabel: 'Inventory alerts',
+      rangeLabel: 'Current',
       primaryValue: input.cards.lowStockCount,
       primaryIsCount: true,
       primaryTone: input.cards.lowStockCount > 0 ? 'danger' : 'success',

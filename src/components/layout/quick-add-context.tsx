@@ -2,6 +2,8 @@
 
 import * as React from 'react'
 
+import type { ExpenseCostDefaultsMap } from '@/lib/expense-cost'
+
 export type QuickAddType = 'sale' | 'expense' | 'product' | 'customer'
 
 type QuickAddContextValue = {
@@ -20,6 +22,7 @@ type QuickAddContextValue = {
   continueEditing: () => void
   fabButtonRef: React.RefObject<HTMLButtonElement | null>
   currency: string
+  expenseCostDefaults?: ExpenseCostDefaultsMap
 }
 
 const QuickAddContext = React.createContext<QuickAddContextValue | null>(null)
@@ -27,9 +30,11 @@ const QuickAddContext = React.createContext<QuickAddContextValue | null>(null)
 export function QuickAddProvider({
   children,
   currency,
+  expenseCostDefaults,
 }: {
   children: React.ReactNode
   currency: string
+  expenseCostDefaults?: ExpenseCostDefaultsMap
 }) {
   const [activeType, setActiveType] = React.useState<QuickAddType | null>(null)
   const [menuOpen, setMenuOpen] = React.useState(false)
@@ -85,6 +90,7 @@ export function QuickAddProvider({
       continueEditing,
       fabButtonRef,
       currency,
+      expenseCostDefaults,
     }),
     [
       activeType,
@@ -97,6 +103,7 @@ export function QuickAddProvider({
       confirmDiscard,
       continueEditing,
       currency,
+      expenseCostDefaults,
     ],
   )
 

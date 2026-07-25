@@ -44,6 +44,7 @@ export function QuickAddModal() {
     confirmDiscard,
     continueEditing,
     currency,
+    expenseCostDefaults,
   } = useQuickAdd()
 
   const [loading, setLoading] = React.useState(false)
@@ -155,6 +156,7 @@ export function QuickAddModal() {
               <ExpenseForm
                 key="quick-expense"
                 currency={options.currency || currency}
+                costDefaults={expenseCostDefaults}
                 onSubmit={createExpenseAction}
                 onSuccess={closeQuickAdd}
                 onCancel={requestCloseQuickAdd}

@@ -10,6 +10,8 @@ interface CsvExportButtonProps {
   filename: string
   headers: string[]
   rows: CsvValue[][]
+  /** Extra rows appended after the main table (e.g. cost summary) */
+  appendRows?: CsvValue[][]
 }
 
 function csvCell(value: CsvValue): string {
@@ -17,11 +19,19 @@ function csvCell(value: CsvValue): string {
   return `"${text.replace(/"/g, '""')}"`
 }
 
-export function CsvExportButton({ filename, headers, rows }: CsvExportButtonProps) {
+export function CsvExportButton({
+  filename,
+  headers,
+  rows,
+  appendRows = [],
+}: CsvExportButtonProps) {
   const downloadCsv = () => {
     const csv = [
       headers.map((header) => csvCell(header)).join(','),
       ...rows.map((row) => row.map((cell) => csvCell(cell)).join(',')),
+      ...appendRows.map((row) =>
+        row.length === 0 ? '' : row.map((cell) => csvCell(cell)).join(','),
+      ),
     ].join('\r\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
     const link = document.createElement('a')

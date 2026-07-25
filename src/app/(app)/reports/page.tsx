@@ -8,13 +8,15 @@ import {
 } from 'lucide-react'
 
 import { CsvExportButton } from '@/components/reports/csv-export-button'
+import { ExpenseCostReport } from '@/components/reports/expense-cost-report'
+import { ProfitWaterfall } from '@/components/reports/profit-waterfall'
 import { ReportsDateRangeFilter } from '@/components/reports/reports-date-range-filter'
 import { PageHeader } from '@/components/shared/page-header'
 import { ReportCard } from '@/components/shared/report-card'
 import { SummaryCard } from '@/components/shared/summary-card'
 import { requireProfile } from '@/lib/auth'
 import { formatDate } from '@/lib/dates'
-import { expenseCategoryLabel, paymentStatusLabel } from '@/lib/labels'
+import { paymentStatusLabel } from '@/lib/labels'
 import { formatCurrency } from '@/lib/money'
 import { getReportsData } from '@/lib/queries/reports'
 import type { DateFilterPreset } from '@/lib/dates'
@@ -73,13 +75,15 @@ export default async function ReportsPage({
           label="Gross Profit"
           value={<Money value={reports.summary.grossProfit} currency={currency} />}
           icon={TrendingUp}
-          tone="success"
+          tone={reports.summary.grossProfit >= 0 ? 'success' : 'danger'}
+          hint="Sales − Production Cost"
         />
         <SummaryCard
           label="Net Profit"
           value={<Money value={reports.summary.netProfit} currency={currency} />}
           icon={WalletCards}
           tone={reports.summary.netProfit >= 0 ? 'success' : 'danger'}
+          hint="After selling & overhead"
         />
         <SummaryCard
           label="Customer Receivables"
@@ -95,130 +99,60 @@ export default async function ReportsPage({
         />
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <ReportCard title="Sales Report">
-          <div className="grid grid-cols-3 gap-3 text-sm">
-            <Metric
-              label="Total sales"
-              value={<Money value={reports.sales.totalSales} currency={currency} />}
-            />
-            <Metric label="Sales" value={reports.sales.count} />
-            <Metric
-              label="Average sale"
-              value={<Money value={reports.sales.averageSale} currency={currency} />}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {Object.entries(reports.sales.byPaymentStatus).map(([status, count]) => (
-              <Metric
-                key={status}
-                label={paymentStatusLabel(status as keyof typeof reports.sales.byPaymentStatus)}
-                value={count}
-              />
-            ))}
-          </div>
-          <CsvExportButton
-            filename="bizlite-sales-report.csv"
-            headers={[
-              'Invoice',
-              'Date',
-              'Customer',
-              'Total',
-              'Paid',
-              'Outstanding',
-              'Status',
-            ]}
-            rows={reports.sales.rows.map((row) => [
-              row.invoiceNumber,
-              formatDate(row.date),
-              row.customer,
-              row.totalAmount,
-              row.amountPaid,
-              row.balancePending,
-              paymentStatusLabel(row.paymentStatus),
-            ])}
-          />
-        </ReportCard>
-
-        <ReportCard title="Expense Report">
-          <div className="grid grid-cols-3 gap-3 text-sm">
-            <Metric
-              label="Total"
-              value={<Money value={reports.expenses.total} currency={currency} />}
-            />
-            <Metric label="Expenses" value={reports.expenses.count} />
-            <Metric
-              label="Average"
-              value={<Money value={reports.expenses.average} currency={currency} />}
-            />
-          </div>
-          <div className="space-y-2">
-            {reports.expenses.byCategory.map((category) => (
-              <div key={category.category} className="flex justify-between text-sm">
-                <span>{expenseCategoryLabel(category.category as never)}</span>
-                <Money value={category.total} currency={currency} />
-              </div>
-            ))}
-          </div>
-          <CsvExportButton
-            filename="bizlite-expense-report.csv"
-            headers={['Date', 'Category', 'Description', 'Amount']}
-            rows={reports.expenses.rows.map((row) => [
-              formatDate(row.date),
-              expenseCategoryLabel(row.category),
-              row.description,
-              row.amount,
-            ])}
-          />
-        </ReportCard>
-      </section>
-
-      <ReportCard title="Profit Report">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <ReportCard title="Sales Report">
+        <div className="grid grid-cols-3 gap-3 text-sm">
           <Metric
-            label="Revenue"
-            value={<Money value={reports.profit.revenue} currency={currency} />}
+            label="Total sales"
+            value={<Money value={reports.sales.totalSales} currency={currency} />}
           />
-          <Metric label="COGS" value={<Money value={reports.profit.cogs} currency={currency} />} />
+          <Metric label="Sales" value={reports.sales.count} />
           <Metric
-            label="Gross profit"
-            value={<Money value={reports.profit.grossProfit} currency={currency} />}
+            label="Average sale"
+            value={<Money value={reports.sales.averageSale} currency={currency} />}
           />
-          <Metric
-            label="Operating expenses"
-            value={<Money value={reports.profit.operatingExpenses} currency={currency} />}
-          />
-          <Metric
-            label="Net profit"
-            value={<Money value={reports.profit.netProfit} currency={currency} />}
-          />
-          <Metric label="Gross margin" value={`${reports.profit.grossMargin.toFixed(2)}%`} />
-          <Metric label="Net margin" value={`${reports.profit.netMargin.toFixed(2)}%`} />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {Object.entries(reports.sales.byPaymentStatus).map(([status, count]) => (
+            <Metric
+              key={status}
+              label={paymentStatusLabel(status as keyof typeof reports.sales.byPaymentStatus)}
+              value={count}
+            />
+          ))}
         </div>
         <CsvExportButton
-          filename="bizlite-profit-report.csv"
+          filename="bizlite-sales-report.csv"
           headers={[
-            'Revenue',
-            'COGS',
-            'Gross profit',
-            'Operating expenses',
-            'Net profit',
-            'Gross margin %',
-            'Net margin %',
+            'Invoice',
+            'Date',
+            'Customer',
+            'Total',
+            'Paid',
+            'Outstanding',
+            'Status',
           ]}
-          rows={[
-            [
-              reports.profit.revenue,
-              reports.profit.cogs,
-              reports.profit.grossProfit,
-              reports.profit.operatingExpenses,
-              reports.profit.netProfit,
-              reports.profit.grossMargin,
-              reports.profit.netMargin,
-            ],
-          ]}
+          rows={reports.sales.rows.map((row) => [
+            row.invoiceNumber,
+            formatDate(row.date),
+            row.customer,
+            row.totalAmount,
+            row.amountPaid,
+            row.balancePending,
+            paymentStatusLabel(row.paymentStatus),
+          ])}
         />
       </ReportCard>
+
+      <section aria-label="Expense cost report">
+        <h2 className="mb-3 text-lg font-semibold text-zinc-900">Expense Report</h2>
+        <ExpenseCostReport
+          currency={currency}
+          expenses={reports.expenses}
+          profit={reports.profit}
+        />
+      </section>
+
+      <ProfitWaterfall currency={currency} profit={reports.profit} />
 
       <ReportTable
         title="Product Performance"

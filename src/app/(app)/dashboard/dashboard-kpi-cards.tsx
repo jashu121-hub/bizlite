@@ -5,6 +5,7 @@ import { TrendingDown, TrendingUp } from 'lucide-react'
 
 import { KpiSummaryModal } from '@/components/dashboard/kpi-summary-modal'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
+import type { PeriodComparison } from '@/lib/dashboard-date-range'
 import type { KpiSummary, KpiType } from '@/lib/types/kpi'
 import { cn } from '@/lib/utils'
 
@@ -12,27 +13,42 @@ type KpiCardItem = {
   type: KpiType
   label: string
   value: number
-  trend?: number | null
+  trend?: PeriodComparison | null
   danger?: boolean
   isCount?: boolean
   ok?: boolean
+  badge?: string | null
   summary: KpiSummary
 }
 
-function Trend({ value }: { value: number | null | undefined }) {
-  if (value === null || value === undefined) return null
-  const up = value >= 0
+function Trend({ value }: { value: PeriodComparison | null | undefined }) {
+  if (!value) return null
+  if (value.percent === null) {
+    return (
+      <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-zinc-500">
+        {value.label}
+      </span>
+    )
+  }
+  if (value.label === 'No change') {
+    return (
+      <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-zinc-500">
+        No change
+      </span>
+    )
+  }
+  const up = value.percent >= 0
   const Icon = up ? TrendingUp : TrendingDown
+  const colour =
+    value.favourable === true
+      ? 'text-emerald-600'
+      : value.favourable === false
+        ? 'text-red-500'
+        : 'text-zinc-500'
   return (
-    <span
-      className={cn(
-        'mt-2 inline-flex items-center gap-1 text-xs font-medium',
-        up ? 'text-emerald-600' : 'text-red-500',
-      )}
-    >
+    <span className={cn('mt-2 inline-flex items-center gap-1 text-xs font-medium', colour)}>
       <Icon className="h-3.5 w-3.5" />
-      {up ? '+' : ''}
-      {value.toFixed(0)}% vs last period
+      {value.label}
     </span>
   )
 }
@@ -94,7 +110,14 @@ export function DashboardKpiCards({
               activeType === kpi.type && 'border-teal-300 shadow-md',
             )}
           >
-            <p className="text-xs font-medium text-zinc-500">{kpi.label}</p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium text-zinc-500">{kpi.label}</p>
+              {kpi.badge ? (
+                <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
+                  {kpi.badge}
+                </span>
+              ) : null}
+            </div>
             <p
               className={cn(
                 'mt-2 text-lg font-bold tracking-tight tabular-nums sm:text-xl',

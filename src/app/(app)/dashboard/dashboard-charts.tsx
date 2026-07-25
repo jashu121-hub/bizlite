@@ -27,12 +27,19 @@ export function DashboardCharts({
   charts: {
     salesVsExpenses: Row[]
     dailyNet: { name: string; value: number; sales?: number; expenses?: number }[]
+    profitTrendGrouping?: 'day' | 'month' | 'year'
     expensesByCategory: Row[]
   }
   currency: string
 }) {
   const money = (value: number) => formatCurrency(value, currency)
   const expenseTotal = charts.expensesByCategory.reduce((sum, row) => sum + row.value, 0)
+  const trendLabel =
+    charts.profitTrendGrouping === 'year'
+      ? 'Yearly net profit trend'
+      : charts.profitTrendGrouping === 'month'
+        ? 'Monthly net profit trend'
+        : 'Daily net profit trend'
 
   return (
     <section className="grid gap-4 xl:grid-cols-3">
@@ -60,7 +67,7 @@ export function DashboardCharts({
 
       <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
         <h3 className="mb-1 text-sm font-semibold text-zinc-800">Net Profit Overview</h3>
-        <p className="mb-4 text-xs text-zinc-500">Daily net profit trend</p>
+        <p className="mb-4 text-xs text-zinc-500">{trendLabel}</p>
         {!charts.dailyNet.length ? (
           <EmptyChart />
         ) : (

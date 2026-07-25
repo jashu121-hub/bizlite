@@ -1,4 +1,11 @@
-import type { ExpenseCategory, PaymentMethod, PaymentStatus } from '@prisma/client'
+import type {
+  ExpenseCategory,
+  ExpenseCostType,
+  ExpenseSubcategory,
+  PaymentMethod,
+  PaymentStatus,
+} from '@prisma/client'
+import { costTypeLabel, subcategoryLabel } from '@/lib/expense-cost'
 
 export function paymentMethodLabel(method: PaymentMethod): string {
   const map: Record<PaymentMethod, string> = {
@@ -33,6 +40,16 @@ export function expenseCategoryLabel(category: ExpenseCategory): string {
     OTHER: 'Other',
   }
   return map[category]
+}
+
+export function expenseCostTypeLabel(costType: ExpenseCostType | null | undefined): string {
+  return costTypeLabel(costType)
+}
+
+export function expenseSubcategoryLabel(
+  subcategory: ExpenseSubcategory | null | undefined,
+): string {
+  return subcategoryLabel(subcategory)
 }
 
 export function stockStatus(current: number, low: number): 'In Stock' | 'Low Stock' | 'Out of Stock' {

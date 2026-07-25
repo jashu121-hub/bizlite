@@ -1,10 +1,40 @@
-import type { PaymentStatus } from '@prisma/client'
+import type { ExpenseCategory, ExpenseCostType, PaymentStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
+import {
+  expenseNeedsClassification,
+  subcategoryLabel,
+} from '@/lib/expense-cost'
+import { expenseCategoryLabel } from '@/lib/labels'
 import { addMoney, money, moneyNumber, percent, subMoney } from '@/lib/money'
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIALLY_PAID', 'PENDING']
+
+type BreakdownRow = {
+  key: string
+  label: string
+  amount: number
+  percentOfGroup: number
+  percentOfTotal: number
+}
+
+function buildBreakdown(
+  items: { key: string; label: string; amount: ReturnType<typeof money> }[],
+  groupTotal: ReturnType<typeof money>,
+  grandTotal: ReturnType<typeof money>,
+): BreakdownRow[] {
+  return items
+    .map((item) => ({
+      key: item.key,
+      label: item.label,
+      amount: moneyNumber(item.amount),
+      percentOfGroup: moneyNumber(percent(item.amount, groupTotal)),
+      percentOfTotal: moneyNumber(percent(item.amount, grandTotal)),
+    }))
+    .filter((row) => row.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+}
 
 export async function getReportsData(
   userId: string,
@@ -44,7 +74,19 @@ export async function getReportsData(
     }),
     prisma.expense.findMany({
       where: periodWhere,
-      select: { id: true, date: true, category: true, description: true, amount: true },
+      select: {
+        id: true,
+        date: true,
+        category: true,
+        costType: true,
+        subcategory: true,
+        description: true,
+        amount: true,
+        paymentMethod: true,
+        vendor: true,
+        reference: true,
+        notes: true,
+      },
       orderBy: { date: 'desc' },
     }),
     prisma.product.findMany({
@@ -74,12 +116,41 @@ export async function getReportsData(
   ])
 
   const revenue = addMoney(...sales.map((sale) => sale.totalAmount))
-  const cogs = addMoney(...sales.map((sale) => sale.totalCost))
-  const grossProfit = subMoney(revenue, cogs)
-  const operatingExpenses = addMoney(...expenses.map((expense) => expense.amount))
-  const netProfit = subMoney(grossProfit, operatingExpenses)
-  const receivables = addMoney(...outstandingSales.map((sale) => sale.balancePending))
-  const stockValue = addMoney(...products.map((product) => money(product.costPrice).times(product.currentStock)))
+  const inventoryCogs = addMoney(...sales.map((sale) => sale.totalCost))
+  const totalExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
+
+  const productionMoney = addMoney(
+    ...expenses
+      .filter((expense) => expense.costType === 'PRODUCTION')
+      .map((expense) => expense.amount),
+  )
+  const sellingMoney = addMoney(
+    ...expenses
+      .filter((expense) => expense.costType === 'SELLING')
+      .map((expense) => expense.amount),
+  )
+  const overheadMoney = addMoney(
+    ...expenses
+      .filter((expense) => expense.costType === 'OVERHEAD')
+      .map((expense) => expense.amount),
+  )
+  const unclassifiedMoney = addMoney(
+    ...expenses
+      .filter((expense) => !expense.costType)
+      .map((expense) => expense.amount),
+  )
+
+  // Profit waterfall uses expense cost classification (not inventory COGS)
+  const grossProfit = subMoney(revenue, productionMoney)
+  const profitAfterSelling = subMoney(grossProfit, sellingMoney)
+  const netProfit = subMoney(profitAfterSelling, overheadMoney)
+
+  const receivables = addMoney(
+    ...outstandingSales.map((sale) => sale.balancePending),
+  )
+  const stockValue = addMoney(
+    ...products.map((product) => money(product.costPrice).times(product.currentStock)),
+  )
 
   const paymentStatusCounts = paymentStatuses.reduce(
     (counts, status) => {
@@ -89,13 +160,43 @@ export async function getReportsData(
     {} as Record<PaymentStatus, number>,
   )
 
-  const expenseCategories = new Map<string, ReturnType<typeof money>>()
-  for (const expense of expenses) {
-    expenseCategories.set(
-      expense.category,
-      money(expenseCategories.get(expense.category) ?? 0).plus(expense.amount),
-    )
+  function groupBreakdown(costType: ExpenseCostType) {
+    const group = expenses.filter((expense) => expense.costType === costType)
+    const groupTotal = addMoney(...group.map((expense) => expense.amount))
+    const buckets = new Map<string, { key: string; label: string; amount: ReturnType<typeof money> }>()
+
+    for (const expense of group) {
+      const key =
+        expense.category === 'TRANSPORT' && expense.subcategory
+          ? expense.subcategory
+          : expense.category
+      const label =
+        expense.category === 'TRANSPORT' && expense.subcategory
+          ? subcategoryLabel(expense.subcategory)
+          : expenseCategoryLabel(expense.category)
+      const current = buckets.get(key) ?? { key, label, amount: money(0) }
+      current.amount = current.amount.plus(expense.amount)
+      buckets.set(key, current)
+    }
+
+    return {
+      total: moneyNumber(groupTotal),
+      percentOfTotal: moneyNumber(percent(groupTotal, totalExpensesMoney)),
+      breakdown: buildBreakdown([...buckets.values()], groupTotal, totalExpensesMoney),
+    }
   }
+
+  const production = groupBreakdown('PRODUCTION')
+  const selling = groupBreakdown('SELLING')
+  const overhead = groupBreakdown('OVERHEAD')
+
+  const needsClassification = expenses.filter((expense) =>
+    expenseNeedsClassification(
+      expense.category as ExpenseCategory,
+      expense.costType,
+      expense.subcategory,
+    ),
+  )
 
   const productPerformance = new Map<
     string,
@@ -150,18 +251,24 @@ export async function getReportsData(
     customerReceivables.set(sale.customerId, row)
   }
 
+  const salesRevenue = moneyNumber(revenue)
+  const hasRevenue = money(revenue).gt(0)
+
   return {
     range,
     summary: {
-      sales: moneyNumber(revenue),
-      expenses: moneyNumber(operatingExpenses),
+      sales: salesRevenue,
+      expenses: moneyNumber(totalExpensesMoney),
+      productionCost: production.total,
+      sellingCost: selling.total,
+      overheadCost: overhead.total,
       grossProfit: moneyNumber(grossProfit),
       netProfit: moneyNumber(netProfit),
       customerReceivables: moneyNumber(receivables),
       stockValue: moneyNumber(stockValue),
     },
     sales: {
-      totalSales: moneyNumber(revenue),
+      totalSales: salesRevenue,
       count: sales.length,
       averageSale: moneyNumber(sales.length ? revenue.div(sales.length) : 0),
       byPaymentStatus: paymentStatusCounts,
@@ -176,27 +283,55 @@ export async function getReportsData(
       })),
     },
     expenses: {
-      total: moneyNumber(operatingExpenses),
+      total: moneyNumber(totalExpensesMoney),
       count: expenses.length,
-      average: moneyNumber(expenses.length ? operatingExpenses.div(expenses.length) : 0),
-      byCategory: [...expenseCategories.entries()]
-        .map(([category, total]) => ({ category, total: moneyNumber(total) }))
-        .sort((a, b) => b.total - a.total),
+      average: moneyNumber(expenses.length ? totalExpensesMoney.div(expenses.length) : 0),
+      production,
+      selling,
+      overhead,
+      unclassifiedTotal: moneyNumber(unclassifiedMoney),
+      needsClassificationCount: needsClassification.length,
+      byCategory: (() => {
+        const map = new Map<string, ReturnType<typeof money>>()
+        for (const expense of expenses) {
+          map.set(
+            expense.category,
+            money(map.get(expense.category) ?? 0).plus(expense.amount),
+          )
+        }
+        return [...map.entries()]
+          .map(([category, total]) => ({ category, total: moneyNumber(total) }))
+          .sort((a, b) => b.total - a.total)
+      })(),
       rows: expenses.map((expense) => ({
         date: expense.date,
         category: expense.category,
+        costType: expense.costType,
+        subcategory: expense.subcategory,
         description: expense.description,
         amount: moneyNumber(expense.amount),
+        paymentMethod: expense.paymentMethod,
+        vendor: expense.vendor,
+        reference: expense.reference,
+        notes: expense.notes,
+        needsClassification: expenseNeedsClassification(
+          expense.category as ExpenseCategory,
+          expense.costType,
+          expense.subcategory,
+        ),
       })),
     },
     profit: {
-      revenue: moneyNumber(revenue),
-      cogs: moneyNumber(cogs),
+      revenue: salesRevenue,
+      productionCost: production.total,
       grossProfit: moneyNumber(grossProfit),
-      operatingExpenses: moneyNumber(operatingExpenses),
+      sellingCost: selling.total,
+      profitAfterSelling: moneyNumber(profitAfterSelling),
+      overheadCost: overhead.total,
       netProfit: moneyNumber(netProfit),
-      grossMargin: moneyNumber(percent(grossProfit, revenue)),
-      netMargin: moneyNumber(percent(netProfit, revenue)),
+      grossMargin: hasRevenue ? moneyNumber(percent(grossProfit, revenue)) : null,
+      netMargin: hasRevenue ? moneyNumber(percent(netProfit, revenue)) : null,
+      inventoryCogs: moneyNumber(inventoryCogs),
     },
     productPerformance: [...productPerformance.values()]
       .map((row) => ({
@@ -223,7 +358,9 @@ export async function getReportsData(
       costPrice: moneyNumber(product.costPrice),
       sellingPrice: moneyNumber(product.sellingPrice),
       stockCostValue: moneyNumber(money(product.costPrice).times(product.currentStock)),
-      potentialSellingValue: moneyNumber(money(product.sellingPrice).times(product.currentStock)),
+      potentialSellingValue: moneyNumber(
+        money(product.sellingPrice).times(product.currentStock),
+      ),
       stockStatus:
         product.currentStock <= 0
           ? 'Out of Stock'

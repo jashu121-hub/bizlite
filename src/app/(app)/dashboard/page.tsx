@@ -40,28 +40,35 @@ export default async function DashboardPage({
     ? (value('preset') as DateFilterPreset)
     : 'month'
   const { profile, user } = await requireProfile()
-  const data = await getDashboardData(user.id, preset, value('from'), value('to'))
+  const data = await getDashboardData(user.id, {
+    preset,
+    from: value('from'),
+    to: value('to'),
+    year: value('year'),
+    month: value('month'),
+  })
   const name = greetingName(profile.ownerName)
   const currency = profile.currency
+  const stockBadge = data.cards.showStockAsCurrent ? 'Current' : null
 
   const kpis = [
     {
       type: 'todaySales' as const,
-      label: "Today's Sales",
+      label: data.cards.labels.firstCard,
       value: data.cards.todaySales,
       trend: data.cards.trends.todaySales,
       summary: data.kpiSummaries.todaySales,
     },
     {
       type: 'monthSales' as const,
-      label: 'This Month Sales',
+      label: data.cards.labels.sales,
       value: data.cards.monthSales,
       trend: data.cards.trends.monthSales,
       summary: data.kpiSummaries.monthSales,
     },
     {
       type: 'monthExpenses' as const,
-      label: 'This Month Expenses',
+      label: data.cards.labels.expenses,
       value: data.cards.monthExpenses,
       trend: data.cards.trends.monthExpenses,
       summary: data.kpiSummaries.monthExpenses,
@@ -84,6 +91,7 @@ export default async function DashboardPage({
       type: 'stockValue' as const,
       label: 'Stock Value',
       value: data.cards.stockValue,
+      badge: stockBadge,
       summary: data.kpiSummaries.stockValue,
     },
     {
@@ -92,6 +100,7 @@ export default async function DashboardPage({
       value: data.cards.lowStockCount,
       isCount: true,
       ok: data.cards.lowStockCount === 0,
+      badge: stockBadge,
       summary: data.kpiSummaries.lowStock,
     },
   ]
@@ -111,9 +120,11 @@ export default async function DashboardPage({
           <DashboardDateFilter
             range={{
               preset: data.range.preset,
-              label: data.range.label,
-              from: data.range.from ? data.range.from.toISOString().slice(0, 10) : null,
-              to: data.range.to ? data.range.to.toISOString().slice(0, 10) : null,
+              label: data.range.displayLabel ?? data.range.label,
+              from: typeof data.range.from === 'string' ? data.range.from : null,
+              to: typeof data.range.to === 'string' ? data.range.to : null,
+              year: data.range.year,
+              month: data.range.month,
             }}
           />
           <div className="flex gap-2">
@@ -146,7 +157,9 @@ export default async function DashboardPage({
             </Link>
           </div>
           {data.recentSales.length === 0 ? (
-            <p className="py-8 text-center text-sm text-zinc-400">No sales yet</p>
+            <p className="py-8 text-center text-sm text-zinc-400">
+              No sales found for this period.
+            </p>
           ) : (
             <ul className="space-y-3">
               {data.recentSales.map((sale) => (
@@ -184,7 +197,9 @@ export default async function DashboardPage({
             </Link>
           </div>
           {data.recentExpenses.length === 0 ? (
-            <p className="py-8 text-center text-sm text-zinc-400">No expenses yet</p>
+            <p className="py-8 text-center text-sm text-zinc-400">
+              No expenses found for this period.
+            </p>
           ) : (
             <ul className="space-y-3">
               {data.recentExpenses.map((expense) => (
@@ -244,7 +259,6 @@ export default async function DashboardPage({
           )}
         </div>
       </section>
-
     </div>
   )
 }

@@ -24,6 +24,18 @@ export const EXPENSE_CATEGORIES = [
   { value: 'OTHER', label: 'Other' },
 ] as const
 
+export const EXPENSE_COST_TYPES = [
+  { value: 'PRODUCTION', label: 'Production Cost' },
+  { value: 'SELLING', label: 'Selling Cost' },
+  { value: 'OVERHEAD', label: 'Overhead Cost' },
+] as const
+
+export const TRANSPORT_SUBCATEGORIES = [
+  { value: 'INWARD_TRANSPORT', label: 'Inward Transport' },
+  { value: 'CUSTOMER_DELIVERY', label: 'Customer Delivery' },
+  { value: 'GENERAL_TRANSPORT', label: 'General Business Transport' },
+] as const
+
 export const PRODUCT_CATEGORIES = [
   'General',
   'Food & Beverage',

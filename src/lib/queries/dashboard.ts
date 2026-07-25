@@ -1,48 +1,67 @@
 import {
   eachDayOfInterval,
+  eachMonthOfInterval,
+  eachYearOfInterval,
   endOfDay,
-  endOfMonth,
   format,
   startOfDay,
   startOfMonth,
+  startOfYear,
   subDays,
-  subMonths,
 } from 'date-fns'
 import { prisma } from '@/lib/prisma'
-import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
+import { prismaDateFilter } from '@/lib/dates'
+import {
+  chartGroupingForRange,
+  comparePeriodValues,
+  getDashboardDateRange,
+  toDashboardDateRangeCompat,
+  toLocalDateInput,
+  type DashboardDateParams,
+} from '@/lib/dashboard-date-range'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { expenseCategoryLabel } from '@/lib/labels'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
-function pctChange(current: number, previous: number): number | null {
-  if (previous === 0) return current === 0 ? 0 : 100
-  return ((current - previous) / Math.abs(previous)) * 100
-}
-
 async function sumSales(
   userId: string,
-  from: Date,
-  to?: Date,
-): Promise<{ total: number; cost: number }> {
-  const agg = await prisma.sale.aggregate({
-    where: {
-      userId,
-      date: to ? { gte: from, lte: to } : { gte: from },
-    },
-    _sum: { totalAmount: true, totalCost: true },
-  })
+  from: Date | null,
+  to: Date | null,
+): Promise<{ total: number; cost: number; paid: number; pending: number; count: number }> {
+  const date =
+    from || to
+      ? {
+          ...(from ? { gte: from } : {}),
+          ...(to ? { lte: to } : {}),
+        }
+      : undefined
+  const where = { userId, ...(date ? { date } : {}) }
+  const [agg, count] = await Promise.all([
+    prisma.sale.aggregate({
+      where,
+      _sum: { totalAmount: true, totalCost: true, amountPaid: true, balancePending: true },
+    }),
+    prisma.sale.count({ where }),
+  ])
   return {
     total: moneyNumber(agg._sum.totalAmount || 0),
     cost: moneyNumber(agg._sum.totalCost || 0),
+    paid: moneyNumber(agg._sum.amountPaid || 0),
+    pending: moneyNumber(agg._sum.balancePending || 0),
+    count,
   }
 }
 
-async function sumExpenses(userId: string, from: Date, to?: Date): Promise<number> {
+async function sumExpenses(userId: string, from: Date | null, to: Date | null): Promise<number> {
+  const date =
+    from || to
+      ? {
+          ...(from ? { gte: from } : {}),
+          ...(to ? { lte: to } : {}),
+        }
+      : undefined
   const agg = await prisma.expense.aggregate({
-    where: {
-      userId,
-      date: to ? { gte: from, lte: to } : { gte: from },
-    },
+    where: { userId, ...(date ? { date } : {}) },
     _sum: { amount: true },
   })
   return moneyNumber(agg._sum.amount || 0)
@@ -59,29 +78,85 @@ const saleSummarySelect = {
   customer: { select: { name: true } },
 } as const
 
-export async function getDashboardData(
-  userId: string,
-  preset: DateFilterPreset = 'month',
-  customFrom?: string | null,
-  customTo?: string | null,
-) {
-  const range = getDateRange(preset, customFrom, customTo)
+function bucketKey(date: Date, grouping: 'day' | 'month' | 'year') {
+  if (grouping === 'year') return format(date, 'yyyy')
+  if (grouping === 'month') return format(date, 'yyyy-MM')
+  return format(date, 'yyyy-MM-dd')
+}
+
+function bucketLabel(date: Date, grouping: 'day' | 'month' | 'year') {
+  if (grouping === 'year') return format(date, 'yyyy')
+  if (grouping === 'month') return format(date, 'MMM yyyy')
+  return format(date, 'd MMM')
+}
+
+export async function getDashboardData(userId: string, params: DashboardDateParams = {}) {
+  const dashboardRange = getDashboardDateRange(params)
+  const range = toDashboardDateRangeCompat(dashboardRange)
   const dateFilter = prismaDateFilter(range)
+  const grouping = chartGroupingForRange(dashboardRange)
+
   const todayStart = startOfDay(new Date())
   const yesterdayStart = startOfDay(subDays(new Date(), 1))
   const yesterdayEnd = endOfDay(subDays(new Date(), 1))
-  const monthStart = startOfMonth(new Date())
-  const monthEnd = endOfMonth(new Date())
-  const prevMonthStart = startOfMonth(subMonths(new Date(), 1))
-  const prevMonthEnd = endOfMonth(subMonths(new Date(), 1))
+  const isCurrentMonthView =
+    dashboardRange.periodType === 'month' && !dashboardRange.showStockAsCurrent
 
-  // Fully sequential to avoid exhausting serverless DB pools
-  const todaySales = await sumSales(userId, todayStart)
-  const yesterdaySales = await sumSales(userId, yesterdayStart, yesterdayEnd)
-  const monthSales = await sumSales(userId, monthStart, monthEnd)
-  const monthExpensesTotal = await sumExpenses(userId, monthStart, monthEnd)
-  const prevMonthSales = await sumSales(userId, prevMonthStart, prevMonthEnd)
-  const prevMonthExpensesTotal = await sumExpenses(userId, prevMonthStart, prevMonthEnd)
+  // Resolve lifetime start from earliest transaction when needed for charts
+  let effectiveStart = dashboardRange.startDate
+  let effectiveEnd = dashboardRange.endDate ?? endOfDay(new Date())
+  if (dashboardRange.periodType === 'lifetime') {
+    const [earliestSale, earliestExpense] = await Promise.all([
+      prisma.sale.findFirst({
+        where: { userId },
+        orderBy: { date: 'asc' },
+        select: { date: true },
+      }),
+      prisma.expense.findFirst({
+        where: { userId },
+        orderBy: { date: 'asc' },
+        select: { date: true },
+      }),
+    ])
+    const candidates = [earliestSale?.date, earliestExpense?.date].filter(Boolean) as Date[]
+    effectiveStart = candidates.length
+      ? startOfDay(new Date(Math.min(...candidates.map((d) => d.getTime()))))
+      : startOfDay(new Date())
+    effectiveEnd = endOfDay(new Date())
+  }
+
+  const periodSalesAgg = await sumSales(
+    userId,
+    dashboardRange.startDate,
+    dashboardRange.endDate,
+  )
+  const periodExpenseTotal = await sumExpenses(
+    userId,
+    dashboardRange.startDate,
+    dashboardRange.endDate,
+  )
+
+  let prevSales = { total: 0, cost: 0, paid: 0, pending: 0, count: 0 }
+  let prevExpenseTotal = 0
+  if (dashboardRange.previousStartDate && dashboardRange.previousEndDate) {
+    prevSales = await sumSales(
+      userId,
+      dashboardRange.previousStartDate,
+      dashboardRange.previousEndDate,
+    )
+    prevExpenseTotal = await sumExpenses(
+      userId,
+      dashboardRange.previousStartDate,
+      dashboardRange.previousEndDate,
+    )
+  }
+
+  const todaySales = isCurrentMonthView
+    ? await sumSales(userId, todayStart, endOfDay(new Date()))
+    : periodSalesAgg
+  const yesterdaySales = isCurrentMonthView
+    ? await sumSales(userId, yesterdayStart, yesterdayEnd)
+    : { total: 0, cost: 0, paid: 0, pending: 0, count: 0 }
 
   const periodSales = await prisma.sale.findMany({
     where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
@@ -90,6 +165,7 @@ export async function getDashboardData(
       date: true,
       totalAmount: true,
       totalCost: true,
+      amountPaid: true,
       balancePending: true,
       invoiceNumber: true,
       paymentStatus: true,
@@ -113,15 +189,16 @@ export async function getDashboardData(
       costPrice: true,
     },
   })
+
   const recentSales = await prisma.sale.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
+    where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     take: 5,
     include: { customer: { select: { name: true } } },
   })
   const recentExpenses = await prisma.expense.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
+    where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     take: 5,
   })
 
@@ -129,6 +206,7 @@ export async function getDashboardData(
     userId,
     balancePending: { gt: 0 },
     customerId: { not: null },
+    ...(dateFilter ? { date: dateFilter } : {}),
   } as const
   const pendingAgg = await prisma.sale.aggregate({
     where: pendingWhere,
@@ -146,39 +224,29 @@ export async function getDashboardData(
     take: 8,
   })
 
-  const todaySalesRows = await prisma.sale.findMany({
-    where: { userId, date: { gte: todayStart } },
-    select: saleSummarySelect,
-    orderBy: { createdAt: 'desc' },
-  })
-  const monthSalesRows = await prisma.sale.findMany({
-    where: { userId, date: { gte: monthStart, lte: monthEnd } },
-    select: saleSummarySelect,
-    orderBy: { date: 'desc' },
-  })
-  const monthExpenseRows =
-    preset === 'month'
-      ? periodExpenses
-      : await prisma.expense.findMany({
-          where: { userId, date: { gte: monthStart, lte: monthEnd } },
-          select: { id: true, date: true, amount: true, category: true, description: true },
-          orderBy: { date: 'desc' },
-        })
+  const todaySalesRows = isCurrentMonthView
+    ? await prisma.sale.findMany({
+        where: { userId, date: { gte: todayStart, lte: endOfDay(new Date()) } },
+        select: saleSummarySelect,
+        orderBy: { createdAt: 'desc' },
+      })
+    : periodSales.map((s) => ({
+        id: s.id,
+        date: s.date,
+        totalAmount: s.totalAmount,
+        amountPaid: s.amountPaid,
+        balancePending: s.balancePending,
+        invoiceNumber: s.invoiceNumber,
+        paymentStatus: s.paymentStatus,
+        customer: s.customer,
+      }))
 
-  const todaySalesTotal = todaySales.total
-  const yesterdaySalesTotal = yesterdaySales.total
-  const monthSalesTotal = monthSales.total
-  const monthGross = moneyNumber(subMoney(monthSales.total, monthSales.cost))
-  const monthNet = moneyNumber(subMoney(monthGross, monthExpensesTotal))
-
-  const prevMonthGross = moneyNumber(subMoney(prevMonthSales.total, prevMonthSales.cost))
-  const prevMonthNet = moneyNumber(subMoney(prevMonthGross, prevMonthExpensesTotal))
-
-  const periodRevenue = moneyNumber(addMoney(...periodSales.map((s) => s.totalAmount)))
-  const periodCogs = addMoney(...periodSales.map((s) => s.totalCost))
-  const periodGross = moneyNumber(subMoney(periodRevenue, periodCogs))
-  const periodExpenseTotal = moneyNumber(addMoney(...periodExpenses.map((e) => e.amount)))
+  const periodRevenue = periodSalesAgg.total
+  const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodSalesAgg.cost))
   const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
+  const prevGross = moneyNumber(subMoney(prevSales.total, prevSales.cost))
+  const prevNet = moneyNumber(subMoney(prevGross, prevExpenseTotal))
+
   const pendingPayments = moneyNumber(pendingAgg._sum.balancePending || 0)
   const stockValue = moneyNumber(
     addMoney(...products.map((p) => money(p.costPrice).times(p.currentStock))),
@@ -194,34 +262,53 @@ export async function getDashboardData(
     )
   }
 
-  const chartStart = range.from ?? monthStart
-  const chartEnd = range.to ?? new Date()
-  const days = eachDayOfInterval({
-    start: startOfDay(chartStart),
-    end: startOfDay(chartEnd > new Date() ? new Date() : chartEnd),
-  }).slice(-31)
+  const chartStart = startOfDay(effectiveStart ?? todayStart)
+  const chartEnd = startOfDay(effectiveEnd > new Date() ? new Date() : effectiveEnd)
+  const intervals =
+    grouping === 'year'
+      ? eachYearOfInterval({ start: startOfYear(chartStart), end: chartEnd })
+      : grouping === 'month'
+        ? eachMonthOfInterval({ start: startOfMonth(chartStart), end: chartEnd })
+        : eachDayOfInterval({ start: chartStart, end: chartEnd })
 
-  const dailyNet = days.map((day) => {
-    const key = format(day, 'yyyy-MM-dd')
-    const daySales = periodSales.filter((s) => format(s.date, 'yyyy-MM-dd') === key)
-    const dayExpenses = periodExpenses.filter((e) => format(e.date, 'yyyy-MM-dd') === key)
+  const profitTrend = intervals.map((point) => {
+    const key = bucketKey(point, grouping)
+    const daySales = periodSales.filter((s) => bucketKey(s.date, grouping) === key)
+    const dayExpenses = periodExpenses.filter((e) => bucketKey(e.date, grouping) === key)
     const sales = addMoney(...daySales.map((s) => s.totalAmount))
     const cogs = addMoney(...daySales.map((s) => s.totalCost))
     const expenses = addMoney(...dayExpenses.map((e) => e.amount))
     return {
-      name: format(day, 'd MMM'),
+      name: bucketLabel(point, grouping),
       value: moneyNumber(subMoney(subMoney(sales, cogs), expenses)),
       sales: moneyNumber(sales),
       expenses: moneyNumber(expenses),
     }
   })
 
+  const lifetime = dashboardRange.periodType === 'lifetime'
+  const todayComparison = isCurrentMonthView
+    ? comparePeriodValues(todaySales.total, yesterdaySales.total)
+    : comparePeriodValues(periodRevenue, lifetime ? null : prevSales.total, { lifetime })
+  const salesComparison = comparePeriodValues(periodRevenue, lifetime ? null : prevSales.total, {
+    lifetime,
+  })
+  const expensesComparison = comparePeriodValues(
+    periodExpenseTotal,
+    lifetime ? null : prevExpenseTotal,
+    { lifetime, invertFavourable: true },
+  )
+  const netComparison = comparePeriodValues(periodNet, lifetime ? null : prevNet, { lifetime })
+
+  const firstCardValue = isCurrentMonthView ? todaySales.total : periodSalesAgg.paid
+  const firstCardLabel = isCurrentMonthView ? "Today's Sales" : 'Paid Amount'
+
   const cards = {
-    todaySales: todaySalesTotal,
-    monthSales: monthSalesTotal,
-    monthExpenses: monthExpensesTotal,
-    grossProfit: monthGross,
-    netProfit: monthNet,
+    todaySales: firstCardValue,
+    monthSales: periodRevenue,
+    monthExpenses: periodExpenseTotal,
+    grossProfit: periodGross,
+    netProfit: periodNet,
     pendingPayments,
     stockValue,
     lowStockCount: lowStock.length,
@@ -229,34 +316,80 @@ export async function getDashboardData(
     periodExpenses: periodExpenseTotal,
     periodGross,
     periodNet,
-    trends: {
-      todaySales: pctChange(todaySalesTotal, yesterdaySalesTotal),
-      monthSales: pctChange(monthSalesTotal, prevMonthSales.total),
-      monthExpenses: pctChange(monthExpensesTotal, prevMonthExpensesTotal),
-      netProfit: pctChange(monthNet, prevMonthNet),
+    periodPaid: periodSalesAgg.paid,
+    periodPending: periodSalesAgg.pending,
+    periodInvoiceCount: periodSalesAgg.count,
+    labels: {
+      firstCard: firstCardLabel,
+      sales: dashboardRange.salesLabel,
+      expenses: dashboardRange.expensesLabel,
+      period: dashboardRange.displayLabel,
     },
+    trends: {
+      todaySales: todayComparison,
+      monthSales: salesComparison,
+      monthExpenses: expensesComparison,
+      netProfit: netComparison,
+    },
+    showStockAsCurrent: dashboardRange.showStockAsCurrent,
   }
 
   const kpiSummaries = buildKpiSummaries({
     todaySalesRows,
-    monthSalesRows,
-    monthExpenseRows,
+    periodSalesRows: periodSales,
+    periodExpenseRows: periodExpenses,
     pendingSalesAll,
     products,
-    cards,
-    monthSalesTotal,
-    prevMonthSalesTotal: prevMonthSales.total,
-    prevMonthExpensesTotal,
-    prevMonthNet,
-    monthLabel: format(new Date(), 'MMMM yyyy'),
-    todayLabel: format(new Date(), 'dd MMM yyyy'),
-    preset,
-    customFrom,
-    customTo,
+    cards: {
+      todaySales: firstCardValue,
+      monthSales: periodRevenue,
+      monthExpenses: periodExpenseTotal,
+      netProfit: periodNet,
+      pendingPayments,
+      stockValue,
+      lowStockCount: lowStock.length,
+      periodPaid: periodSalesAgg.paid,
+      periodPending: periodSalesAgg.pending,
+      periodInvoiceCount: periodSalesAgg.count,
+      trends: {
+        todaySales: todayComparison,
+        monthSales: salesComparison,
+        monthExpenses: expensesComparison,
+        netProfit: netComparison,
+      },
+    },
+    periodSalesTotal: periodRevenue,
+    prevPeriodSalesTotal: prevSales.total,
+    prevPeriodExpensesTotal: prevExpenseTotal,
+    prevPeriodNet: prevNet,
+    periodLabel: dashboardRange.displayLabel,
+    firstCardTitle: firstCardLabel,
+    firstCardRangeLabel: isCurrentMonthView
+      ? format(new Date(), 'dd MMM yyyy')
+      : dashboardRange.displayLabel,
+    salesTitle: dashboardRange.salesLabel,
+    expensesTitle: dashboardRange.expensesLabel,
+    isTodayFirstCard: isCurrentMonthView,
+    periodType: dashboardRange.periodType,
+    customFrom: dashboardRange.customFrom,
+    customTo: dashboardRange.customTo,
+    year: dashboardRange.year,
+    month: dashboardRange.month,
   })
 
   return {
-    range,
+    range: {
+      ...range,
+      label: dashboardRange.displayLabel,
+      year: dashboardRange.year,
+      month: dashboardRange.month,
+      from: dashboardRange.startDate
+        ? toLocalDateInput(dashboardRange.startDate)
+        : null,
+      to: dashboardRange.endDate ? toLocalDateInput(dashboardRange.endDate) : null,
+      periodType: dashboardRange.periodType,
+      displayLabel: dashboardRange.displayLabel,
+    },
     cards,
     kpiSummaries,
     recentSales,
@@ -268,7 +401,8 @@ export async function getDashboardData(
         { name: 'Sales', value: periodRevenue },
         { name: 'Expenses', value: periodExpenseTotal },
       ],
-      dailyNet,
+      dailyNet: profitTrend,
+      profitTrendGrouping: grouping,
       expensesByCategory: [...expenseByCategory.entries()]
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value),

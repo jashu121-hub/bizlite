@@ -20,6 +20,11 @@ interface DateRangeFilterProps {
   value: DateRange
   onChange: (range: DateRange) => void
   className?: string
+  /** Optional period label override shown beside the dropdown */
+  displayLabel?: string
+  /** Extra controls (month/year navigation) rendered after the label */
+  navigation?: React.ReactNode
+  disabled?: boolean
 }
 
 const PRESETS: { value: DateFilterPreset; label: string }[] = [
@@ -38,28 +43,65 @@ function toInputDate(date: Date | null): string {
   return `${year}-${month}-${day}`
 }
 
-export function DateRangeFilter({ value, onChange, className }: DateRangeFilterProps) {
+export function DateRangeFilter({
+  value,
+  onChange,
+  className,
+  displayLabel,
+  navigation,
+  disabled,
+}: DateRangeFilterProps) {
+  const [uiPreset, setUiPreset] = React.useState<DateFilterPreset>(value.preset)
   const [customFrom, setCustomFrom] = React.useState(() => toInputDate(value.from))
   const [customTo, setCustomTo] = React.useState(() => toInputDate(value.to))
+  const appliedCustom = React.useRef({
+    from: toInputDate(value.from),
+    to: toInputDate(value.to),
+  })
 
   React.useEffect(() => {
+    setUiPreset(value.preset)
     if (value.preset === 'custom') {
-      setCustomFrom(toInputDate(value.from))
-      setCustomTo(toInputDate(value.to))
+      const from = toInputDate(value.from)
+      const to = toInputDate(value.to)
+      setCustomFrom(from)
+      setCustomTo(to)
+      appliedCustom.current = { from, to }
     }
   }, [value])
 
   const handlePresetChange = (preset: DateFilterPreset) => {
+    setUiPreset(preset)
     if (preset === 'custom') {
-      onChange(getDateRange('custom', customFrom || null, customTo || null))
+      const from = customFrom || toInputDate(new Date())
+      const to = customTo || from
+      setCustomFrom(from)
+      setCustomTo(to)
       return
     }
     onChange(getDateRange(preset))
   }
 
   const applyCustomRange = () => {
-    onChange(getDateRange('custom', customFrom || null, customTo || null))
+    if (!customFrom || !customTo) return
+    if (customTo < customFrom) return
+    appliedCustom.current = { from: customFrom, to: customTo }
+    onChange(getDateRange('custom', customFrom, customTo))
   }
+
+  const cancelCustom = () => {
+    setCustomFrom(appliedCustom.current.from)
+    setCustomTo(appliedCustom.current.to)
+    setUiPreset(value.preset)
+  }
+
+  const clearCustom = () => {
+    setCustomFrom('')
+    setCustomTo('')
+  }
+
+  const label = displayLabel ?? value.label
+  const showCustom = uiPreset === 'custom'
 
   return (
     <div className={cn('space-y-3', className)}>
@@ -68,7 +110,11 @@ export function DateRangeFilter({ value, onChange, className }: DateRangeFilterP
           <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="sr-only sm:not-sr-only">Date range</span>
         </div>
-        <Select value={value.preset} onValueChange={(v) => handlePresetChange(v as DateFilterPreset)}>
+        <Select
+          value={uiPreset}
+          onValueChange={(v) => handlePresetChange(v as DateFilterPreset)}
+          disabled={disabled}
+        >
           <SelectTrigger className="w-full sm:w-[200px]" aria-label="Date range preset">
             <SelectValue placeholder="Select range" />
           </SelectTrigger>
@@ -80,35 +126,74 @@ export function DateRangeFilter({ value, onChange, className }: DateRangeFilterP
             ))}
           </SelectContent>
         </Select>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400" aria-live="polite">
-          {value.label}
-        </p>
+        {showCustom ? (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400" aria-live="polite">
+            {value.preset === 'custom' ? label : 'Select dates and Apply'}
+          </p>
+        ) : (
+          navigation ?? (
+            <p className="text-sm text-zinc-500 dark:text-zinc-400" aria-live="polite">
+              {label}
+            </p>
+          )
+        )}
       </div>
 
-      {value.preset === 'custom' ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-2">
+      {showCustom ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-[140px] flex-1 space-y-2">
             <Label htmlFor="date-from">From</Label>
             <Input
               id="date-from"
               type="date"
               value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
+              disabled={disabled}
+              onChange={(e) => {
+                const next = e.target.value
+                setCustomFrom(next)
+                if (customTo && next && customTo < next) setCustomTo(next)
+              }}
             />
           </div>
-          <div className="flex-1 space-y-2">
+          <div className="min-w-[140px] flex-1 space-y-2">
             <Label htmlFor="date-to">To</Label>
             <Input
               id="date-to"
               type="date"
               value={customTo}
               min={customFrom || undefined}
+              disabled={disabled}
               onChange={(e) => setCustomTo(e.target.value)}
             />
           </div>
-          <Button type="button" onClick={applyCustomRange} className="shrink-0">
-            Apply
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={applyCustomRange}
+              disabled={disabled || !customFrom || !customTo || customTo < customFrom}
+              className="shrink-0"
+            >
+              Apply
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={cancelCustom}
+              disabled={disabled}
+              className="shrink-0"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={clearCustom}
+              disabled={disabled}
+              className="shrink-0"
+            >
+              Clear
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>

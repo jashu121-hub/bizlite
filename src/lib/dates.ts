@@ -44,7 +44,7 @@ export function getDateRange(
         preset,
         from: startOfYear(reference),
         to: endOfYear(reference),
-        label: String(reference.getFullYear()),
+        label: `Year ${reference.getFullYear()}`,
       }
     case 'custom': {
       const from = customFrom ? startOfDay(parseISO(customFrom)) : null
@@ -55,7 +55,7 @@ export function getDateRange(
         to,
         label:
           from && to
-            ? `${format(from, 'dd MMM yyyy')} – ${format(to, 'dd MMM yyyy')}`
+            ? `${format(from, 'd MMMM yyyy')} – ${format(to, 'd MMMM yyyy')}`
             : 'Custom range',
       }
     }
