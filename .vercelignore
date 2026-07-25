@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.next
+node_modules
+*.log
+scripts/test-signup.mjs
+scripts/inspect-keys.mjs
+scripts/compare-env.mjs
+scripts/show-vercel-env-meta.mjs
+scripts/reset-vercel-env.mjs
+scripts/set-vercel-env.mjs
+scripts/pull-supabase-env.mjs
+.env.vercel.check
+.env.supabase.tmp
