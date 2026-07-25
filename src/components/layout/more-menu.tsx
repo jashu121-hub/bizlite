@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, LogOut, Settings, Users } from 'lucide-react'
+import { BarChart3, Landmark, LogOut, Settings, Users } from 'lucide-react'
 
 import { InstallAppButton } from '@/components/shared/install-app-button'
 import { useLogout } from '@/components/layout/use-logout'
@@ -18,6 +18,7 @@ import { APP_NAME } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 const MORE_ITEMS = [
+  { href: '/cash-bank', label: 'Cash & Bank', icon: Landmark },
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/settings', label: 'Settings', icon: Settings },

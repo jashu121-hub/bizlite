@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   HelpCircle,
+  Landmark,
 } from 'lucide-react'
 
 import { useLogout } from '@/components/layout/use-logout'
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/sales', label: 'Sales', icon: Receipt },
   { href: '/expenses', label: 'Expenses', icon: Wallet },
+  { href: '/cash-bank', label: 'Cash & Bank', icon: Landmark },
   { href: '/products', label: 'Products', icon: Package },
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3 },

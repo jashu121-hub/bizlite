@@ -106,6 +106,14 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
       if (!customer) throw new Error('Customer not found')
     }
 
+    const cashAccountId = input.cashAccountId || null
+    if (cashAccountId) {
+      const cashAccount = await tx.cashAccount.findFirst({
+        where: { id: cashAccountId, userId, isActive: true },
+      })
+      if (!cashAccount) throw new Error('Selected cash/bank account was not found')
+    }
+
     const sale = await tx.sale.create({
       data: {
         userId,
@@ -121,6 +129,7 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
         grossProfit: prismaDecimal(totals.grossProfit),
         paymentMethod: input.paymentMethod as PaymentMethod,
         paymentStatus,
+        cashAccountId,
         notes: input.notes || null,
         items: {
           create: lines.map((l) => ({
@@ -137,6 +146,24 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
       },
       include: { items: true, customer: true },
     })
+
+    if (cashAccountId && amountPaid.gt(0)) {
+      await tx.cashAccount.update({
+        where: { id: cashAccountId },
+        data: { currentBalance: { increment: prismaDecimal(amountPaid) } },
+      })
+      await tx.cashTransaction.create({
+        data: {
+          userId,
+          accountId: cashAccountId,
+          type: 'SALE_RECEIPT',
+          date,
+          amount: prismaDecimal(amountPaid),
+          saleId: sale.id,
+          notes: `Sale ${invoiceNumber}`,
+        },
+      })
+    }
 
     const stockByProduct = new Map<string, number>()
     for (const line of lines) {
@@ -296,6 +323,26 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       })),
     })
 
+    const cashAccountId = input.cashAccountId || null
+    if (cashAccountId) {
+      const cashAccount = await tx.cashAccount.findFirst({
+        where: { id: cashAccountId, userId, isActive: true },
+      })
+      if (!cashAccount) throw new Error('Selected cash/bank account was not found')
+    }
+
+    // Reverse prior sale cash postings before rewriting
+    const priorCash = await tx.cashTransaction.findMany({
+      where: { userId, saleId: existing.id },
+    })
+    for (const row of priorCash) {
+      await tx.cashAccount.update({
+        where: { id: row.accountId },
+        data: { currentBalance: { decrement: row.amount } },
+      })
+    }
+    await tx.cashTransaction.deleteMany({ where: { userId, saleId: existing.id } })
+
     const sale = await tx.sale.update({
       where: { id: existing.id },
       data: {
@@ -310,6 +357,7 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
         grossProfit: prismaDecimal(totals.grossProfit),
         paymentMethod: input.paymentMethod as PaymentMethod,
         paymentStatus,
+        cashAccountId,
         notes: input.notes || null,
         items: {
           create: lines.map((l) => ({
@@ -326,6 +374,24 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       },
       include: { items: true, customer: true },
     })
+
+    if (cashAccountId && amountPaid.gt(0)) {
+      await tx.cashAccount.update({
+        where: { id: cashAccountId },
+        data: { currentBalance: { increment: prismaDecimal(amountPaid) } },
+      })
+      await tx.cashTransaction.create({
+        data: {
+          userId,
+          accountId: cashAccountId,
+          type: 'SALE_RECEIPT',
+          date,
+          amount: prismaDecimal(amountPaid),
+          saleId: sale.id,
+          notes: `Sale ${existing.invoiceNumber}`,
+        },
+      })
+    }
 
     return sale
   }, TX_OPTIONS)
@@ -371,6 +437,17 @@ export async function deleteSaleTransaction(userId: string, saleId: string) {
         })),
       })
     }
+
+    const priorCash = await tx.cashTransaction.findMany({
+      where: { userId, saleId: sale.id },
+    })
+    for (const row of priorCash) {
+      await tx.cashAccount.update({
+        where: { id: row.accountId },
+        data: { currentBalance: { decrement: row.amount } },
+      })
+    }
+    await tx.cashTransaction.deleteMany({ where: { userId, saleId: sale.id } })
 
     await tx.customerPayment.deleteMany({ where: { saleId: sale.id, userId } })
     await tx.sale.delete({ where: { id: sale.id } })

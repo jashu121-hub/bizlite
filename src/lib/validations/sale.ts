@@ -18,6 +18,7 @@ export const saleSchema = z
     discount: moneySchema,
     amountPaid: moneySchema,
     paymentMethod: paymentMethodSchema,
+    cashAccountId: z.string().optional().or(z.literal('')),
     notes: z.string().max(1000).optional().or(z.literal('')),
   })
   .superRefine((data, ctx) => {

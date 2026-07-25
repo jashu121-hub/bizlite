@@ -19,10 +19,13 @@ import type { ExpenseCategoryDTO } from '@/lib/expense-categories'
 import { expenseSchema, type ExpenseInput } from '@/lib/validations/expense'
 import { cn } from '@/lib/utils'
 
+type CashAccountOption = { id: string; name: string; type: string }
+
 type ExpenseFormProps = {
   currency: string
   initial?: Partial<ExpenseInput>
   categories: ExpenseCategoryDTO[]
+  cashAccounts?: CashAccountOption[]
   onSubmit: (data: ExpenseInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
@@ -34,6 +37,7 @@ export function ExpenseForm({
   currency,
   initial,
   categories,
+  cashAccounts = [],
   onSubmit,
   onSuccess,
   onCancel,
@@ -70,6 +74,7 @@ export function ExpenseForm({
       description: '',
       amount: '',
       paymentMethod: 'CASH',
+      cashAccountId: '',
       vendor: '',
       reference: '',
       notes: '',
@@ -236,6 +241,24 @@ export function ExpenseForm({
           </select>
         </Field>
       </div>
+      {cashAccounts.length > 0 ? (
+        <Field label="Pay from account (optional)">
+          <select
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('cashAccountId')}
+          >
+            <option value="">Do not update Cash & Bank</option>
+            {cashAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-500">
+            Deducts the expense amount from the selected cash or bank account.
+          </p>
+        </Field>
+      ) : null}
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Vendor (optional)">
           <Input {...form.register('vendor')} placeholder="Supplier or vendor" />

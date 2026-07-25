@@ -13,7 +13,7 @@ export default async function EditSalePage({
 }) {
   const { id } = await params
   const { user, profile } = await requireProfile()
-  const [sale, products, customers] = await Promise.all([
+  const [sale, products, customers, cashAccounts] = await Promise.all([
     prisma.sale.findFirst({ where: { id, userId: user.id }, include: { items: true } }),
     prisma.product.findMany({
       where: { userId: user.id, isActive: true },
@@ -29,6 +29,11 @@ export default async function EditSalePage({
     prisma.customer.findMany({
       where: { userId: user.id },
       select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.cashAccount.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true, type: true },
       orderBy: { name: 'asc' },
     }),
   ])
@@ -77,6 +82,7 @@ export default async function EditSalePage({
         saleId={id}
         products={productOptions}
         customers={customers}
+        cashAccounts={cashAccounts}
         currency={profile.currency}
         initial={{
           date: format(sale.date, 'yyyy-MM-dd'),
@@ -89,6 +95,7 @@ export default async function EditSalePage({
           discount: sale.discount.toString(),
           amountPaid: sale.amountPaid.toString(),
           paymentMethod: sale.paymentMethod,
+          cashAccountId: sale.cashAccountId ?? '',
           notes: sale.notes ?? '',
         }}
       />

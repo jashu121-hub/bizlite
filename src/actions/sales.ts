@@ -20,6 +20,7 @@ export async function createSaleAction(raw: unknown) {
     revalidatePath('/dashboard')
     revalidatePath('/products')
     revalidatePath('/reports')
+    revalidatePath('/cash-bank')
     return ok({ id: sale.id }, 'Sale created')
   } catch (error) {
     console.error('createSaleAction', error)
@@ -38,6 +39,7 @@ export async function updateSaleAction(id: string, raw: unknown) {
     revalidatePath('/dashboard')
     revalidatePath('/products')
     revalidatePath('/reports')
+    revalidatePath('/cash-bank')
     return ok({ id: sale.id }, 'Sale updated')
   } catch (error) {
     console.error('updateSaleAction', error)
@@ -53,6 +55,7 @@ export async function deleteSaleAction(id: string) {
     revalidatePath('/dashboard')
     revalidatePath('/products')
     revalidatePath('/reports')
+    revalidatePath('/cash-bank')
     return ok({ id }, 'Sale deleted')
   } catch (error) {
     console.error('deleteSaleAction', error)

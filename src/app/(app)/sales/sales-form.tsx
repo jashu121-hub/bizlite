@@ -20,9 +20,12 @@ import { formatCurrency } from '@/lib/money'
 import { saleSchema, type SaleInput } from '@/lib/validations/sale'
 import { cn } from '@/lib/utils'
 
+type CashAccountOption = { id: string; name: string; type: string }
+
 type SalesFormProps = {
   products: ProductOption[]
   customers: CustomerOption[]
+  cashAccounts?: CashAccountOption[]
   currency: string
   initial?: Partial<SaleInput>
   /** When set, form updates this sale instead of creating a new one. */
@@ -41,6 +44,7 @@ const emptyLine = { productId: '', quantity: 1, unitSellingPrice: '' }
 export function SalesForm({
   products,
   customers,
+  cashAccounts = [],
   currency,
   initial,
   saleId,
@@ -62,6 +66,7 @@ export function SalesForm({
       discount: '',
       amountPaid: '',
       paymentMethod: 'CASH',
+      cashAccountId: '',
       notes: '',
       ...initial,
       items: initial?.items?.length ? initial.items : [emptyLine],
@@ -368,6 +373,28 @@ export function SalesForm({
           </select>
         </div>
       </div>
+
+      {cashAccounts.length > 0 ? (
+        <div className="space-y-2">
+          <label htmlFor="cash-account">Deposit to account (optional)</label>
+          <select
+            id="cash-account"
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('cashAccountId')}
+          >
+            <option value="">Do not update Cash & Bank</option>
+            {cashAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-500">
+            When amount paid is entered, it is added to the selected account ledger (not as income
+            separately).
+          </p>
+        </div>
+      ) : null}
 
       <div className="space-y-1 rounded-lg bg-zinc-100 p-4 text-right dark:bg-zinc-900">
         <p>Subtotal: {formatCurrency(subtotal, currency)}</p>

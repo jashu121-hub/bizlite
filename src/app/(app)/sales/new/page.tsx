@@ -5,7 +5,7 @@ import { SalesForm } from '../sales-form'
 
 export default async function NewSalePage() {
   const { user, profile } = await requireProfile()
-  const [products, customers] = await Promise.all([
+  const [products, customers, cashAccounts] = await Promise.all([
     prisma.product.findMany({
       where: { userId: user.id, isActive: true },
       select: {
@@ -22,6 +22,11 @@ export default async function NewSalePage() {
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
+    prisma.cashAccount.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
+    }),
   ])
 
   return (
@@ -33,6 +38,7 @@ export default async function NewSalePage() {
           sellingPrice: product.sellingPrice.toString(),
         }))}
         customers={customers}
+        cashAccounts={cashAccounts}
         currency={profile.currency}
       />
     </div>

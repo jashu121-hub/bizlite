@@ -10,6 +10,7 @@ export const expenseSchema = z
     description: z.string().min(1, 'Description is required').max(200),
     amount: requiredPositiveMoneySchema,
     paymentMethod: paymentMethodSchema,
+    cashAccountId: z.string().optional().or(z.literal('')),
     vendor: z.string().max(160).optional().or(z.literal('')),
     reference: z.string().max(120).optional().or(z.literal('')),
     notes: z.string().max(1000).optional().or(z.literal('')),

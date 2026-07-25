@@ -36,6 +36,32 @@ enum StockMovementType {
   ADJUSTMENT_OUT
 }
 
+enum CashAccountType {
+  CASH
+  BANK
+  OTHER
+}
+
+enum CashBalanceSource {
+  OWNER_CAPITAL
+  PREVIOUS_BUSINESS_BALANCE
+  LOAN_RECEIVED
+  OTHER_FUNDING
+}
+
+enum CashTransactionType {
+  OPENING_BALANCE
+  STARTING_BALANCE
+  MONEY_IN
+  MONEY_OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  SALE_RECEIPT
+  EXPENSE_PAYMENT
+  CUSTOMER_PAYMENT
+  BALANCE_ADJUSTMENT
+}
+
 model UserProfile {
   id               String   @id @db.Uuid
   email            String   @unique
@@ -55,8 +81,60 @@ model UserProfile {
   expenseCategories ExpenseCategoryItem[]
   customerPayments  CustomerPayment[]
   stockMovements    StockMovement[]
+  cashAccounts      CashAccount[]
+  cashTransactions  CashTransaction[]
 
   @@index([email])
+}
+
+model CashAccount {
+  id            String          @id @default(cuid())
+  userId        String          @db.Uuid
+  name          String
+  type          CashAccountType
+  bankName      String?
+  accountNumber String?
+  notes         String?
+  isActive      Boolean         @default(true)
+  currentBalance Decimal        @default(0) @db.Decimal(14, 2)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  user         UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CashTransaction[]
+  sales        Sale[]
+  expenses     Expense[]
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@index([userId, type])
+}
+
+model CashTransaction {
+  id            String               @id @default(cuid())
+  userId        String               @db.Uuid
+  accountId     String
+  type          CashTransactionType
+  date          DateTime             @db.Date
+  /// Signed amount: positive increases balance, negative decreases it.
+  amount        Decimal              @db.Decimal(14, 2)
+  balanceSource CashBalanceSource?
+  reference     String?
+  notes         String?
+  transferGroupId String?
+  saleId        String?
+  expenseId     String?
+  createdAt     DateTime             @default(now())
+
+  user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account CashAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([userId, date])
+  @@index([saleId])
+  @@index([expenseId])
+  @@index([transferGroupId])
 }
 
 model ExpenseCategoryItem {
@@ -144,20 +222,23 @@ model Sale {
   grossProfit   Decimal       @db.Decimal(14, 2)
   paymentMethod PaymentMethod @default(CASH)
   paymentStatus PaymentStatus @default(PENDING)
+  cashAccountId String?
   notes         String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  user     UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customer Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  items    SaleItem[]
-  payments CustomerPayment[]
+  user        UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer    Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashAccount CashAccount?      @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  items       SaleItem[]
+  payments    CustomerPayment[]
 
   @@unique([userId, invoiceNumber])
   @@index([userId])
   @@index([userId, date])
   @@index([userId, paymentStatus])
   @@index([customerId])
+  @@index([cashAccountId])
 }
 
 model SaleItem {
@@ -210,20 +291,23 @@ model Expense {
   description   String
   amount        Decimal          @db.Decimal(14, 2)
   paymentMethod PaymentMethod    @default(CASH)
+  cashAccountId String?
   vendor        String?
   reference     String?
   notes         String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
-  user     UserProfile         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category ExpenseCategoryItem @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  user        UserProfile         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    ExpenseCategoryItem @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  cashAccount CashAccount?        @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([userId, date])
   @@index([userId, categoryId])
   @@index([userId, costType])
   @@index([categoryId])
+  @@index([cashAccountId])
 }
 
 model StockMovement {

@@ -71,12 +71,17 @@ export default async function EditExpensePage({
 }) {
   const { id } = await params
   const { profile, user } = await requireProfile()
-  const [expense, categories] = await Promise.all([
+  const [expense, categories, cashAccounts] = await Promise.all([
     prisma.expense.findFirst({
       where: { id, userId: user.id },
       include: { category: true },
     }),
     listExpenseCategories(user.id, { includeArchived: true }),
+    prisma.cashAccount.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
+    }),
   ])
   if (!expense) notFound()
 
@@ -86,6 +91,7 @@ export default async function EditExpensePage({
       <ExpenseForm
         currency={profile.currency}
         categories={withCurrentCategory(categories, expense.category)}
+        cashAccounts={cashAccounts}
         initial={{
           date: format(expense.date, 'yyyy-MM-dd'),
           categoryId: expense.categoryId,
@@ -93,6 +99,7 @@ export default async function EditExpensePage({
           description: expense.description,
           amount: expense.amount.toString(),
           paymentMethod: expense.paymentMethod,
+          cashAccountId: expense.cashAccountId ?? '',
           vendor: expense.vendor ?? '',
           reference: expense.reference ?? '',
           notes: expense.notes ?? '',
