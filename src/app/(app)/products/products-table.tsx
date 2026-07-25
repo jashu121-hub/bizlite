@@ -1,19 +1,27 @@
 'use client'
 
-import Link from 'next/link'
-
+import {
+  ProductActions,
+  ProductNameButton,
+} from '@/app/(app)/products/product-actions'
+import { StockStatusBadge } from '@/app/(app)/products/stock-status-badge'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { ResponsiveDataTable } from '@/components/shared/responsive-data-table'
-import { stockStatus } from '@/lib/labels'
+import { cn } from '@/lib/utils'
 
 export type ProductRow = {
   id: string
   name: string
   category: string
+  sku: string | null
   currentStock: number
   lowStockLevel: number
+  openingStock: number
+  costPrice: string
   sellingPrice: string
+  notes: string | null
   isActive: boolean
+  updatedAt: string
 }
 
 export function ProductsTable({
@@ -36,16 +44,19 @@ export function ProductsTable({
           key: 'name',
           header: 'Product',
           cell: (p) => (
-            <Link className="font-medium hover:underline" href={`/products/${p.id}`}>
-              {p.name}
-            </Link>
+            <div className="min-w-0">
+              <ProductNameButton product={p} currency={currency} />
+              {p.sku ? <p className="text-xs text-zinc-400">SKU: {p.sku}</p> : null}
+            </div>
           ),
         },
         { key: 'category', header: 'Category', cell: (p) => p.category },
         {
           key: 'stock',
           header: 'Stock',
-          cell: (p) => `${p.currentStock} (${stockStatus(p.currentStock, p.lowStockLevel)})`,
+          cell: (p) => (
+            <StockStatusBadge currentStock={p.currentStock} lowStockLevel={p.lowStockLevel} />
+          ),
         },
         {
           key: 'price',
@@ -56,19 +67,29 @@ export function ProductsTable({
           key: 'status',
           header: 'Status',
           cell: (p) => (
-            <span className={p.isActive ? 'text-emerald-600' : 'text-zinc-500'}>
-              {p.isActive ? 'Active' : 'Inactive'}
+            <span className={cn(p.isActive ? 'text-emerald-600' : 'text-zinc-500')}>
+              {p.isActive ? 'Active' : 'Archived'}
             </span>
           ),
         },
+        {
+          key: 'actions',
+          header: 'Actions',
+          className: 'text-right',
+          cell: (p) => <ProductActions product={p} currency={currency} />,
+        },
       ]}
       renderMobileCard={(p) => (
-        <div className="space-y-2">
-          <Link className="font-medium" href={`/products/${p.id}`}>
-            {p.name}
-          </Link>
-          <div className="flex justify-between text-sm">
-            <span>{p.currentStock} in stock</span>
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <ProductNameButton product={p} currency={currency} />
+              <p className="text-sm text-zinc-500">{p.category}</p>
+            </div>
+            <ProductActions product={p} currency={currency} compact />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <StockStatusBadge currentStock={p.currentStock} lowStockLevel={p.lowStockLevel} />
             <CurrencyDisplay value={p.sellingPrice} currency={currency} />
           </div>
         </div>

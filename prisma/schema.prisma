@@ -199,15 +199,19 @@ model Expense {
 }
 
 model StockMovement {
-  id        String            @id @default(cuid())
-  userId    String            @db.Uuid
-  productId String
-  type      StockMovementType
-  quantity  Int
-  date      DateTime          @db.Date
-  notes     String?
-  saleId    String?
-  createdAt DateTime          @default(now())
+  id             String            @id @default(cuid())
+  userId         String            @db.Uuid
+  productId      String
+  type           StockMovementType
+  quantity       Int
+  quantityBefore Int?
+  quantityAfter  Int?
+  reason         String?
+  reference      String?
+  date           DateTime          @db.Date
+  notes          String?
+  saleId         String?
+  createdAt      DateTime          @default(now())
 
   user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)

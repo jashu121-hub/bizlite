@@ -23,6 +23,8 @@ type ProductFormProps = {
   onCancel?: () => void
   onDirtyChange?: (dirty: boolean) => void
   className?: string
+  /** Hide opening stock when editing — stock changes go through Add/Adjust Stock */
+  hideOpeningStock?: boolean
 }
 
 export function ProductForm({
@@ -33,6 +35,7 @@ export function ProductForm({
   onCancel,
   onDirtyChange,
   className,
+  hideOpeningStock = false,
 }: ProductFormProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -136,10 +139,15 @@ export function ProductForm({
           />
         </div>
       </div>
-      <div className="grid gap-5 sm:grid-cols-2">
-        {field('Opening stock', 'openingStock', 'number')}
+      <div className={cn('grid gap-5', hideOpeningStock ? '' : 'sm:grid-cols-2')}>
+        {hideOpeningStock ? null : field('Opening stock', 'openingStock', 'number')}
         {field('Low stock alert level', 'lowStockLevel', 'number')}
       </div>
+      {hideOpeningStock ? (
+        <p className="text-xs text-zinc-500">
+          Current stock is managed with Add Stock or Adjust Stock actions.
+        </p>
+      ) : null}
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" {...form.register('notes')} />

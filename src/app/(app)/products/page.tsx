@@ -29,10 +29,15 @@ export default async function ProductsPage({
     id: p.id,
     name: p.name,
     category: p.category,
+    sku: p.sku,
     currentStock: p.currentStock,
     lowStockLevel: p.lowStockLevel,
+    openingStock: p.openingStock,
+    costPrice: p.costPrice.toString(),
     sellingPrice: p.sellingPrice.toString(),
+    notes: p.notes,
     isActive: p.isActive,
+    updatedAt: p.updatedAt.toISOString(),
   }))
 
   return (
@@ -42,7 +47,7 @@ export default async function ProductsPage({
         description={
           stock === 'low'
             ? 'Showing products at or below their low-stock alert level.'
-            : 'Manage inventory and pricing.'
+            : 'Manage inventory, stock, and pricing.'
         }
         actions={
           <Button asChild>
