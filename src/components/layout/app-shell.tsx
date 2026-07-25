@@ -14,18 +14,19 @@ interface AppShellProps {
 
 export function AppShell({ children, className, ownerName, email }: AppShellProps) {
   return (
-    <div className="flex min-h-dvh flex-col bg-[#f3f6f5]">
-      <OfflineBanner />
-      <div className="flex min-h-0 flex-1">
-        <DesktopSidebar ownerName={ownerName} email={email} />
+    <div className="flex h-screen w-full max-w-none overflow-hidden bg-[#f3f6f5]">
+      <DesktopSidebar ownerName={ownerName} email={email} />
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <OfflineBanner />
         <main
           className={cn(
-            'min-w-0 flex-1 overflow-y-auto',
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto',
             'pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0',
             className,
           )}
         >
-          <div className="mx-auto w-full max-w-[1400px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+          <div className="w-full min-w-0 max-w-none px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
             {children}
           </div>
           <footer className="px-4 pb-6 text-center text-xs text-zinc-400 md:pb-8">
@@ -33,6 +34,7 @@ export function AppShell({ children, className, ownerName, email }: AppShellProp
           </footer>
         </main>
       </div>
+
       <MobileBottomNavigation />
     </div>
   )

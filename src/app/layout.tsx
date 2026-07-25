@@ -57,7 +57,7 @@ export default function RootLayout({
       className={`${plusJakarta.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh flex flex-col font-sans">
+      <body className="min-h-dvh w-full max-w-none overflow-x-hidden font-sans">
         <Providers>
           {children}
           <Toaster richColors closeButton position="top-center" />
