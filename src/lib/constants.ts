@@ -1,0 +1,40 @@
+export const APP_NAME = 'BizLite'
+export const APP_DESCRIPTION = 'Simple small business management'
+export const DEFAULT_CURRENCY = 'AED'
+export const THEME_COLOR = '#0f766e'
+export const BACKGROUND_COLOR = '#f4f7f6'
+
+export const PAYMENT_METHODS = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CARD', label: 'Card' },
+  { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+  { value: 'OTHER', label: 'Other' },
+] as const
+
+export const EXPENSE_CATEGORIES = [
+  { value: 'MATERIALS', label: 'Materials' },
+  { value: 'TRANSPORT', label: 'Transport' },
+  { value: 'RENT', label: 'Rent' },
+  { value: 'UTILITIES', label: 'Utilities' },
+  { value: 'PACKAGING', label: 'Packaging' },
+  { value: 'MARKETING', label: 'Marketing' },
+  { value: 'SALARY', label: 'Salary' },
+  { value: 'MAINTENANCE', label: 'Maintenance' },
+  { value: 'OTHER', label: 'Other' },
+] as const
+
+export const PRODUCT_CATEGORIES = [
+  'General',
+  'Food & Beverage',
+  'Clothing',
+  'Electronics',
+  'Beauty',
+  'Home',
+  'Services',
+  'Other',
+] as const
+
+export const CURRENCIES = ['AED', 'USD', 'EUR', 'GBP', 'SAR', 'INR'] as const
+
+export const PAGE_SIZE = 10

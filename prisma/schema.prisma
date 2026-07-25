@@ -1,0 +1,219 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  MOBILE_MONEY
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIALLY_PAID
+  PENDING
+}
+
+enum ExpenseCategory {
+  MATERIALS
+  TRANSPORT
+  RENT
+  UTILITIES
+  PACKAGING
+  MARKETING
+  SALARY
+  MAINTENANCE
+  OTHER
+}
+
+enum StockMovementType {
+  OPENING
+  SALE
+  SALE_REVERSAL
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+model UserProfile {
+  id               String   @id @db.Uuid
+  email            String   @unique
+  businessName     String?
+  ownerName        String?
+  phone            String?
+  currency         String   @default("AED")
+  setupCompleted   Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  products          Product[]
+  customers         Customer[]
+  sales             Sale[]
+  expenses          Expense[]
+  customerPayments  CustomerPayment[]
+  stockMovements    StockMovement[]
+
+  @@index([email])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  userId         String   @db.Uuid
+  name           String
+  category       String
+  sku            String?
+  costPrice      Decimal  @db.Decimal(14, 2)
+  sellingPrice   Decimal  @db.Decimal(14, 2)
+  openingStock   Int      @default(0)
+  currentStock   Int      @default(0)
+  lowStockLevel  Int      @default(5)
+  notes          String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           UserProfile     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  saleItems      SaleItem[]
+  stockMovements StockMovement[]
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@index([userId, name])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  userId    String   @db.Uuid
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     UserProfile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sales    Sale[]
+  payments CustomerPayment[]
+
+  @@index([userId])
+  @@index([userId, name])
+}
+
+model Sale {
+  id            String        @id @default(cuid())
+  userId        String        @db.Uuid
+  customerId    String?
+  invoiceNumber String
+  date          DateTime      @db.Date
+  subtotal      Decimal       @db.Decimal(14, 2)
+  discount      Decimal       @default(0) @db.Decimal(14, 2)
+  totalAmount   Decimal       @db.Decimal(14, 2)
+  amountPaid    Decimal       @default(0) @db.Decimal(14, 2)
+  balancePending Decimal      @db.Decimal(14, 2)
+  totalCost     Decimal       @db.Decimal(14, 2)
+  grossProfit   Decimal       @db.Decimal(14, 2)
+  paymentMethod PaymentMethod @default(CASH)
+  paymentStatus PaymentStatus @default(PENDING)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user     UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items    SaleItem[]
+  payments CustomerPayment[]
+
+  @@unique([userId, invoiceNumber])
+  @@index([userId])
+  @@index([userId, date])
+  @@index([userId, paymentStatus])
+  @@index([customerId])
+}
+
+model SaleItem {
+  id              String  @id @default(cuid())
+  saleId          String
+  productId       String?
+  productName     String
+  quantity        Int
+  unitCost        Decimal @db.Decimal(14, 2)
+  unitSellingPrice Decimal @db.Decimal(14, 2)
+  lineTotal       Decimal @db.Decimal(14, 2)
+  lineCost        Decimal @db.Decimal(14, 2)
+  lineProfit      Decimal @db.Decimal(14, 2)
+
+  sale    Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model CustomerPayment {
+  id            String        @id @default(cuid())
+  userId        String        @db.Uuid
+  customerId    String
+  saleId        String?
+  date          DateTime      @db.Date
+  amount        Decimal       @db.Decimal(14, 2)
+  paymentMethod PaymentMethod @default(CASH)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user     UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sale     Sale?       @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([customerId])
+  @@index([saleId])
+  @@index([userId, date])
+}
+
+model Expense {
+  id            String          @id @default(cuid())
+  userId        String          @db.Uuid
+  date          DateTime        @db.Date
+  category      ExpenseCategory
+  description   String
+  amount        Decimal         @db.Decimal(14, 2)
+  paymentMethod PaymentMethod   @default(CASH)
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@index([userId, category])
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  userId    String            @db.Uuid
+  productId String
+  type      StockMovementType
+  quantity  Int
+  date      DateTime          @db.Date
+  notes     String?
+  saleId    String?
+  createdAt DateTime          @default(now())
+
+  user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([userId, date])
+  @@index([saleId])
+}

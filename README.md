@@ -1,36 +1,223 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BizLite
 
-## Getting Started
+BizLite is a production-ready, mobile-first Progressive Web App for small business management. It covers sales, expenses, products, customers, reports, and basic business settings — with Supabase authentication, PostgreSQL storage via Prisma, and installable PWA support for Android and iPhone.
 
-First, run the development server:
+## Main features
+
+- Dashboard with profit cards, charts, quick actions, and date filters
+- Multi-item sales with invoice numbers, stock reduction, and payment tracking
+- Expenses by category
+- Products with stock adjustments and stock movements
+- Customers with receivables and payment recording
+- Reports with CSV export
+- Business setup and settings
+- Light / dark mode
+- Installable PWA with offline shell fallback
+
+## Technology stack
+
+- Next.js (App Router) + TypeScript
+- Tailwind CSS + shadcn/ui-style components
+- Supabase Auth + Supabase PostgreSQL
+- Prisma ORM
+- React Hook Form + Zod
+- Recharts
+- date-fns
+- Sonner
+- next-themes
+- `@ducanh2912/next-pwa`
+- Vercel-ready deployment
+
+## Local installation
+
+```bash
+npm install
+```
+
+Copy environment variables:
+
+```bash
+cp .env.example .env
+```
+
+Fill in your Supabase values (see below).
+
+```bash
+npx prisma generate
+npx prisma migrate dev --name init
+npm run seed
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## Supabase project setup
+
+1. Create a project at [https://supabase.com](https://supabase.com).
+2. Go to **Project Settings → Database** and copy:
+   - **Connection string (URI)** for `DIRECT_URL` (port `5432`)
+   - **Connection pooling** URI for `DATABASE_URL` (port `6543`, add `?pgbouncer=true`)
+3. Go to **Project Settings → API** and copy:
+   - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
+   - `anon` `public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (server only)
+4. Authentication → Providers → Email: enable Email provider.
+5. Authentication → URL configuration:
+   - Site URL: `http://localhost:3000` (local) or your production domain
+   - Redirect URLs: include `http://localhost:3000/reset-password` and your production reset URL
+
+## Environment variables
+
+See `.env.example`:
+
+```env
+DATABASE_URL=""
+DIRECT_URL=""
+NEXT_PUBLIC_SUPABASE_URL=""
+NEXT_PUBLIC_SUPABASE_ANON_KEY=""
+SUPABASE_SERVICE_ROLE_KEY=""
+```
+
+Never commit real secrets. Never expose the service-role key to the browser.
+
+## Prisma migration
+
+```bash
+npx prisma generate
+npx prisma migrate dev --name init
+```
+
+Studio:
+
+```bash
+npm run db:studio
+```
+
+## Seed instructions
+
+```bash
+npm run seed
+```
+
+Demo login created by the seed script:
+
+- Email: `demo@bizlite.app`
+- Password: `Demo1234!`
+
+Requires `SUPABASE_SERVICE_ROLE_KEY` and a working database connection.
+
+## Development commands
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run typecheck
+npm run lint
+npm run build
+npm run start
+npm run seed
+npm run db:generate
+npm run db:migrate
+npm run db:studio
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Exact quality commands:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npx prisma generate
+npx prisma migrate dev --name init
+npm run seed
+npm run dev
+npm run typecheck
+npm run lint
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Production build
 
-## Learn More
+```bash
+npm run build
+npm run start
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Vercel deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push the repository to GitHub.
+2. Import the project in Vercel.
+3. Add all environment variables from `.env.example`.
+4. Deploy.
+5. In Supabase Auth URL settings, set the Site URL and redirect URLs to your Vercel domain.
+6. Run migrations against production:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npx prisma migrate deploy
+```
 
-## Deploy on Vercel
+Optionally seed production with care:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run seed
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Custom-domain setup
+
+1. Add your domain in the Vercel project settings.
+2. Update DNS as instructed by Vercel.
+3. Update Supabase Auth Site URL and redirect URLs to the custom domain.
+4. Redeploy if needed.
+
+## PWA installation on Android
+
+1. Open BizLite in Chrome.
+2. Use the browser install prompt, or open **More → Install BizLite** / **Settings → Install BizLite**.
+3. Confirm install.
+4. Launch from the home screen (standalone, no browser bar).
+
+## PWA installation on iPhone
+
+1. Open BizLite in Safari.
+2. Tap **Share**.
+3. Tap **Add to Home Screen**.
+4. Confirm **Add**.
+5. Open BizLite from the home screen.
+
+In-app instructions are also shown under **More** and **Settings** on iOS.
+
+## Application-update behaviour
+
+The service worker uses `skipWaiting` and `clientsClaim`. After a new deployment, the next visit activates the updated service worker so users receive the latest version automatically.
+
+## Offline behaviour
+
+BizLite requires internet for database operations.
+
+When offline:
+
+- The app shell can still load from cache
+- An offline banner appears
+- `/offline` is used as the document fallback
+- Forms disable saving when the server cannot be reached
+- The app does not pretend a transaction was saved
+
+## Security notes
+
+- Routes are protected by middleware + server-side `requireProfile()`
+- Every query is scoped by `userId`
+- Critical sale operations run inside Prisma transactions
+- Money math uses Decimal.js (not floating point)
+- Service-role key stays server-side only
+
+## Troubleshooting
+
+| Issue | Fix |
+| --- | --- |
+| `Prisma` connection errors | Check `DATABASE_URL` / `DIRECT_URL`, password encoding, and Supabase network restrictions |
+| Auth redirect loops | Confirm Supabase URL/keys and Site URL settings |
+| Seed fails | Ensure service-role key is set and Email auth is enabled |
+| PWA not installable | Use HTTPS (or localhost), open in a supported browser, confirm `manifest.webmanifest` and icons load |
+| iPhone install missing | Must use Safari → Share → Add to Home Screen |
+| Charts empty | Add sales/expenses for the selected date range |
+
+## License
+
+Private project — all rights reserved.

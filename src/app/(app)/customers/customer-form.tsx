@@ -1,0 +1,11 @@
+'use client'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useRouter } from 'next/navigation'
+import { useTransition } from 'react'
+import { toast } from 'sonner'
+import { customerSchema, type CustomerInput } from '@/lib/validations/customer'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Button } from '@/components/ui/button'
+export function CustomerForm({initial,onSubmit}:{initial?:Partial<CustomerInput>;onSubmit:(d:CustomerInput)=>Promise<any>}){const r=useRouter();const [p,start]=useTransition();const f=useForm<any>({resolver:zodResolver(customerSchema),defaultValues:{name:'',phone:'',email:'',address:'',notes:'',...initial}});return <form className="mx-auto max-w-xl space-y-4" onSubmit={f.handleSubmit((d:CustomerInput)=>start(async()=>{const x=await onSubmit(d);if(!x.success){toast.error(x.error);return}toast.success(x.message??'Customer saved');r.push('/customers');r.refresh()}))}>{[['Name','name'],['Phone','phone'],['Email','email']].map(([label,name])=><div key={name}><label>{label}</label><Input type={name==='email'?'email':'text'} {...f.register(name)}/></div>)}<div><label>Address</label><Textarea {...f.register('address')}/></div><div><label>Notes</label><Textarea {...f.register('notes')}/></div><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>r.back()}>Cancel</Button><Button disabled={p}>{p?'Saving…':'Save customer'}</Button></div></form>}

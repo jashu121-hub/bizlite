@@ -1,0 +1,11 @@
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { deleteProductAction, updateProductAction } from '@/actions/products'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { StockAdjustForm } from './stock-adjust-form'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import type { ProductInput } from '@/lib/validations/product'
+export function ProductActions({id,data}:{id:string;data:ProductInput}){const router=useRouter();const [open,setOpen]=useState(false);const mutate=async(fn:()=>Promise<any>)=>{const r=await fn();if(!r.success){toast.error(r.error);return}toast.success(r.message??'Product updated');router.refresh()};return <div className="flex flex-wrap gap-2"><Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="outline">Adjust stock</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Adjust stock</DialogTitle></DialogHeader><StockAdjustForm productId={id} onDone={()=>{setOpen(false);router.refresh()}}/></DialogContent></Dialog><Button variant="outline" onClick={()=>void mutate(()=>updateProductAction(id,{...data,isActive:!data.isActive}))}>{data.isActive?'Deactivate':'Activate'}</Button><ConfirmDialog title="Delete product?" description="Products linked to sales cannot be deleted." confirmLabel="Delete" variant="destructive" onConfirm={async()=>{await mutate(()=>deleteProductAction(id))}} trigger={<Button variant="destructive">Delete</Button>}/></div>}
