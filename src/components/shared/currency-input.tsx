@@ -20,11 +20,23 @@ interface CurrencyInputProps {
   'aria-label'?: string
 }
 
+function isEmptyMoney(value: MoneyInput): boolean {
+  return value === '' || value === null || value === undefined
+}
+
 function sanitizeCurrencyInput(raw: string): string {
   const cleaned = raw.replace(/[^\d.]/g, '')
   const parts = cleaned.split('.')
   if (parts.length <= 1) return cleaned
   return `${parts[0]}.${parts.slice(1).join('').slice(0, 2)}`
+}
+
+function toExternalDisplay(value: MoneyInput): string {
+  if (isEmptyMoney(value)) return ''
+  const raw = String(value).trim()
+  if (raw === '') return ''
+  if (Number.isNaN(Number(raw))) return ''
+  return moneyString(raw)
 }
 
 export function CurrencyInput({
@@ -39,30 +51,43 @@ export function CurrencyInput({
   className,
   'aria-label': ariaLabel,
 }: CurrencyInputProps) {
-  const [display, setDisplay] = React.useState(() => moneyString(value))
+  const [display, setDisplay] = React.useState(() =>
+    isEmptyMoney(value) ? '' : String(value).trim(),
+  )
   const isFocused = React.useRef(false)
 
   React.useEffect(() => {
-    if (!isFocused.current) {
-      setDisplay(moneyString(value))
-    }
+    if (isFocused.current) return
+    setDisplay(isEmptyMoney(value) ? '' : toExternalDisplay(value))
   }, [value])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const next = sanitizeCurrencyInput(e.target.value)
     setDisplay(next)
-    onChange(next === '' ? '0' : next)
+    onChange(next)
   }
 
   const handleBlur = () => {
     isFocused.current = false
+    if (display.trim() === '') {
+      setDisplay('')
+      onChange('')
+      return
+    }
     const normalized = moneyString(display)
     setDisplay(normalized)
     onChange(normalized)
   }
 
-  const handleFocus = () => {
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     isFocused.current = true
+    // Keep the raw in-progress value while editing; select so typing replaces it
+    if (!isEmptyMoney(value)) {
+      setDisplay(String(value).trim())
+    }
+    requestAnimationFrame(() => {
+      e.target.select()
+    })
   }
 
   return (

@@ -3,7 +3,10 @@ import { dateStringSchema, moneySchema, paymentMethodSchema } from './common'
 
 export const saleItemSchema = z.object({
   productId: z.string().min(1, 'Product is required'),
-  quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+  quantity: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? undefined : v),
+    z.coerce.number().int().positive('Quantity must be at least 1'),
+  ),
   unitSellingPrice: moneySchema,
 })
 
@@ -12,18 +15,19 @@ export const saleSchema = z
     date: dateStringSchema,
     customerId: z.string().optional().or(z.literal('')),
     items: z.array(saleItemSchema).min(1, 'Add at least one product'),
-    discount: moneySchema.default('0'),
-    amountPaid: moneySchema.default('0'),
+    discount: moneySchema,
+    amountPaid: moneySchema,
     paymentMethod: paymentMethodSchema,
     notes: z.string().max(1000).optional().or(z.literal('')),
   })
   .superRefine((data, ctx) => {
     const subtotal = data.items.reduce(
-      (sum, item) => sum + Number(item.quantity) * Number(item.unitSellingPrice),
+      (sum, item) =>
+        sum + Number(item.quantity) * (item.unitSellingPrice === '' ? 0 : Number(item.unitSellingPrice)),
       0,
     )
-    const discount = Number(data.discount) || 0
-    const amountPaid = Number(data.amountPaid) || 0
+    const discount = data.discount === '' ? 0 : Number(data.discount) || 0
+    const amountPaid = data.amountPaid === '' ? 0 : Number(data.amountPaid) || 0
     const total = Math.max(0, subtotal - discount)
 
     if (discount > subtotal) {

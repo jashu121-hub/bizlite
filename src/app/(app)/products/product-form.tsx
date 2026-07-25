@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import { ProductCostCalculator } from '@/components/products/product-cost-calculator'
 import { CurrencyInput } from '@/components/shared/currency-input'
+import { NumberInput } from '@/components/shared/number-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -47,9 +48,9 @@ export function ProductForm({
       name: '',
       category: 'General',
       sku: '',
-      costPrice: '0',
-      sellingPrice: '0',
-      openingStock: 0,
+      costPrice: '',
+      sellingPrice: '',
+      openingStock: '',
       lowStockLevel: 5,
       notes: '',
       isActive: true,
@@ -90,11 +91,23 @@ export function ProductForm({
   const field = (label: string, name: keyof ProductInput, type = 'text') => (
     <div className="space-y-2">
       <Label htmlFor={String(name)}>{label}</Label>
-      <Input
-        id={String(name)}
-        type={type}
-        {...form.register(name as never, { valueAsNumber: type === 'number' })}
-      />
+      {type === 'number' ? (
+        <NumberInput
+          id={String(name)}
+          integer
+          min={0}
+          placeholder="0"
+          value={form.watch(String(name)) as string | number | undefined}
+          onChange={(value) =>
+            form.setValue(String(name), value === '' ? '' : Number(value), {
+              shouldDirty: true,
+              shouldValidate: true,
+            })
+          }
+        />
+      ) : (
+        <Input id={String(name)} type={type} {...form.register(name as never)} />
+      )}
       <p className="text-sm text-red-600" role="alert">
         {String(form.formState.errors[name]?.message ?? '')}
       </p>
@@ -158,7 +171,7 @@ export function ProductForm({
       <ProductCostCalculator
         currency={currency}
         value={costBreakdown}
-        sellingPrice={sellingPrice || '0'}
+        sellingPrice={sellingPrice || ''}
         defaultOpen={Boolean(initial?.costBreakdown)}
         onChange={(breakdown) =>
           form.setValue('costBreakdown', breakdown, { shouldDirty: true, shouldValidate: true })

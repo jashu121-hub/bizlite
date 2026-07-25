@@ -68,7 +68,7 @@ export function ExpenseForm({
       date: todayInputValue(),
       categoryId: initialSelected?.id ?? '',
       description: '',
-      amount: '0',
+      amount: '',
       paymentMethod: 'CASH',
       vendor: '',
       reference: '',

@@ -11,6 +11,7 @@ import { ProductModalShell } from '@/app/(app)/products/product-modal-shell'
 import type { ProductRow } from '@/app/(app)/products/products-table'
 import { ProductCostCalculator } from '@/components/products/product-cost-calculator'
 import { CurrencyInput } from '@/components/shared/currency-input'
+import { NumberInput } from '@/components/shared/number-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -135,24 +136,28 @@ export function AddStockModal({
 
         <div className="space-y-2">
           <Label htmlFor="add-qty">Quantity to add</Label>
-          <Input
+          <NumberInput
             id="add-qty"
-            type="number"
+            integer
             min={1}
-            {...form.register('quantity', {
-              valueAsNumber: true,
-              onChange: (e) => {
-                const qty = Math.max(1, Math.floor(Number(e.target.value) || 1))
-                const current = form.getValues('costBreakdown') as ProductCostBreakdown | null
-                if (current) {
-                  form.setValue(
-                    'costBreakdown',
-                    normalizeCostBreakdown({ ...current, productionQuantity: qty }),
-                    { shouldDirty: true },
-                  )
-                }
-              },
-            })}
+            placeholder="1"
+            value={form.watch('quantity')}
+            onChange={(value) => {
+              if (value === '') {
+                form.setValue('quantity', '', { shouldDirty: true, shouldValidate: true })
+                return
+              }
+              const qty = Math.max(1, Math.floor(Number(value) || 1))
+              form.setValue('quantity', qty, { shouldDirty: true, shouldValidate: true })
+              const current = form.getValues('costBreakdown') as ProductCostBreakdown | null
+              if (current) {
+                form.setValue(
+                  'costBreakdown',
+                  normalizeCostBreakdown({ ...current, productionQuantity: qty }),
+                  { shouldDirty: true },
+                )
+              }
+            }}
           />
           <p className="text-sm text-red-600" role="alert">
             {String(form.formState.errors.quantity?.message ?? '')}

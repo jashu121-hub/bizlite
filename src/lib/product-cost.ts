@@ -41,21 +41,21 @@ export type ProductCostTotals = {
   estimatedFinalMarginPct: string
 }
 
-export const emptyCostBreakdown = (quantity = 1): ProductCostBreakdown => ({
+export const emptyCostBreakdown = (quantity = 0): ProductCostBreakdown => ({
   productionQuantity: quantity,
-  materials: '0',
-  stitching: '0',
-  design: '0',
-  packaging: '0',
-  inwardTransport: '0',
-  customs: '0',
-  otherProduction: '0',
+  materials: '',
+  stitching: '',
+  design: '',
+  packaging: '',
+  inwardTransport: '',
+  customs: '',
+  otherProduction: '',
   customProductionCosts: [],
-  marketing: '0',
-  commission: '0',
-  outwardDelivery: '0',
-  marketplaceFees: '0',
-  otherSelling: '0',
+  marketing: '',
+  commission: '',
+  outwardDelivery: '',
+  marketplaceFees: '',
+  otherSelling: '',
   totalProductionCost: '0.00',
   inventoryCostPerUnit: '0.00',
   totalSellingCost: '0.00',
@@ -63,41 +63,51 @@ export const emptyCostBreakdown = (quantity = 1): ProductCostBreakdown => ({
   fullCostPerUnit: '0.00',
 })
 
-function nonNeg(value: MoneyInput): string {
-  const amount = money(value)
-  return amount.isNeg() ? '0.00' : moneyString(amount)
+/** Keep empty fields empty; never force 0.00 into editable money fields. */
+function fieldMoney(value: MoneyInput | undefined): string {
+  if (value === '' || value === null || value === undefined) return ''
+  const raw = String(value).trim()
+  if (raw === '') return ''
+  const amount = money(raw)
+  if (amount.isNeg()) return ''
+  return raw
 }
 
 export function normalizeCostBreakdown(
   input?: Partial<ProductCostBreakdown> | null,
 ): ProductCostBreakdown {
-  const base = emptyCostBreakdown(input?.productionQuantity && input.productionQuantity > 0 ? input.productionQuantity : 1)
+  const qtyRaw = input?.productionQuantity
+  const productionQuantity =
+    qtyRaw === undefined || qtyRaw === null || Number.isNaN(Number(qtyRaw))
+      ? 0
+      : Math.max(0, Math.floor(Number(qtyRaw)))
+
+  const base = emptyCostBreakdown(productionQuantity)
   const custom = Array.isArray(input?.customProductionCosts)
     ? input!.customProductionCosts.map((line, index) => ({
         id: line.id || `custom-${index}`,
         name: line.name || '',
-        amount: nonNeg(line.amount || '0'),
+        amount: fieldMoney(line.amount),
       }))
     : []
 
   const draft: ProductCostBreakdown = {
     ...base,
     ...input,
-    productionQuantity:
-      input?.productionQuantity && input.productionQuantity > 0 ? Math.floor(input.productionQuantity) : 1,
-    materials: nonNeg(input?.materials ?? '0'),
-    stitching: nonNeg(input?.stitching ?? '0'),
-    design: nonNeg(input?.design ?? '0'),
-    packaging: nonNeg(input?.packaging ?? '0'),
-    inwardTransport: nonNeg(input?.inwardTransport ?? '0'),
-    customs: nonNeg(input?.customs ?? '0'),
-    otherProduction: nonNeg(input?.otherProduction ?? '0'),
+    productionQuantity,
+    materials: fieldMoney(input?.materials),
+    stitching: fieldMoney(input?.stitching),
+    design: fieldMoney(input?.design),
+    packaging: fieldMoney(input?.packaging),
+    inwardTransport: fieldMoney(input?.inwardTransport),
+    customs: fieldMoney(input?.customs),
+    otherProduction: fieldMoney(input?.otherProduction),
     customProductionCosts: custom,
-    marketing: nonNeg(input?.marketing ?? '0'),
-    commission: nonNeg(input?.commission ?? '0'),
-    outwardDelivery: nonNeg(input?.outwardDelivery ?? '0'),
-    marketplaceFees: nonNeg(input?.marketplaceFees ?? '0'),
-    otherSelling: nonNeg(input?.otherSelling ?? '0'),
+    marketing: fieldMoney(input?.marketing),
+    commission: fieldMoney(input?.commission),
+    outwardDelivery: fieldMoney(input?.outwardDelivery),
+    marketplaceFees: fieldMoney(input?.marketplaceFees),
+    otherSelling: fieldMoney(input?.otherSelling),
   }
 
   return withComputedTotals(draft)
@@ -153,7 +163,8 @@ export function withComputedTotals(breakdown: ProductCostBreakdown): ProductCost
   const totals = computeCostTotals(breakdown)
   return {
     ...breakdown,
-    productionQuantity: totals.productionQuantity,
+    // Preserve the form quantity (0 = empty); do not force calculated min of 1 into the input
+    productionQuantity: breakdown.productionQuantity,
     totalProductionCost: totals.totalProductionCost,
     inventoryCostPerUnit: totals.inventoryCostPerUnit,
     totalSellingCost: totals.totalSellingCost,

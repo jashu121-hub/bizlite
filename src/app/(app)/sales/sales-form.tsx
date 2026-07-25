@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { createSaleAction, updateSaleAction } from '@/actions/sales'
 import { CustomerSelector, type CustomerOption } from '@/components/shared/customer-selector'
 import { CurrencyInput } from '@/components/shared/currency-input'
+import { NumberInput } from '@/components/shared/number-input'
 import { ProductSelector, type ProductOption } from '@/components/shared/product-selector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,7 +36,7 @@ type SalesFormProps = {
   className?: string
 }
 
-const emptyLine = { productId: '', quantity: 1, unitSellingPrice: '0' }
+const emptyLine = { productId: '', quantity: 1, unitSellingPrice: '' }
 
 export function SalesForm({
   products,
@@ -58,8 +59,8 @@ export function SalesForm({
     defaultValues: {
       date: todayInputValue(),
       customerId: '',
-      discount: '0',
-      amountPaid: '0',
+      discount: '',
+      amountPaid: '',
       paymentMethod: 'CASH',
       notes: '',
       ...initial,
@@ -68,12 +69,20 @@ export function SalesForm({
   })
   const itemsArray = useFieldArray({ control: form.control, name: 'items' })
   const items = useWatch({ control: form.control, name: 'items' }) ?? []
-  const discountValue = Number(useWatch({ control: form.control, name: 'discount' })) || 0
-  const amountPaid = Number(useWatch({ control: form.control, name: 'amountPaid' })) || 0
+  const discountRaw = useWatch({ control: form.control, name: 'discount' })
+  const amountPaidRaw = useWatch({ control: form.control, name: 'amountPaid' })
+  const discountValue = discountRaw === '' || discountRaw == null ? 0 : Number(discountRaw) || 0
+  const amountPaid = amountPaidRaw === '' || amountPaidRaw == null ? 0 : Number(amountPaidRaw) || 0
 
   const subtotal = items.reduce(
-    (sum: number, item: { quantity?: number; unitSellingPrice?: string }) =>
-      sum + (Number(item?.quantity) || 0) * (Number(item?.unitSellingPrice) || 0),
+    (sum: number, item: { quantity?: number; unitSellingPrice?: string }) => {
+      const qty = Number(item?.quantity) || 0
+      const price =
+        item?.unitSellingPrice === '' || item?.unitSellingPrice == null
+          ? 0
+          : Number(item.unitSellingPrice) || 0
+      return sum + qty * price
+    },
     0,
   )
   const total = Math.max(0, subtotal - Math.max(0, discountValue))
@@ -262,25 +271,32 @@ export function SalesForm({
               />
               <div className="space-y-2">
                 <label htmlFor={`qty-${index}`}>Qty</label>
-                <Input
+                <NumberInput
                   id={`qty-${index}`}
-                  type="number"
+                  integer
                   min={1}
-                  max={product?.currentStock ?? undefined}
-                  step={1}
-                  {...form.register(`items.${index}.quantity`, {
-                    valueAsNumber: true,
-                    onChange: (event) => {
-                      const next = Number(event.target.value)
-                      if (!product) return
-                      if (next > product.currentStock) {
-                        form.setValue(`items.${index}.quantity`, product.currentStock, {
-                          shouldDirty: true,
-                        })
-                        toast.error(`Only ${product.currentStock} in stock`)
-                      }
-                    },
-                  })}
+                  max={product?.currentStock}
+                  placeholder="1"
+                  value={form.watch(`items.${index}.quantity`)}
+                  onChange={(value) => {
+                    if (value === '') {
+                      form.setValue(`items.${index}.quantity`, '', {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                      return
+                    }
+                    let next = Number.parseInt(value, 10)
+                    if (Number.isNaN(next)) return
+                    if (product && next > product.currentStock) {
+                      next = product.currentStock
+                      toast.error(`Only ${product.currentStock} in stock`)
+                    }
+                    form.setValue(`items.${index}.quantity`, next, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }}
                 />
                 <p className="text-xs text-zinc-500">
                   {product

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { dateStringSchema, moneySchema, paymentMethodSchema } from './common'
+import { dateStringSchema, paymentMethodSchema, requiredPositiveMoneySchema } from './common'
 
 export const customerSchema = z.object({
   name: z.string().min(1, 'Customer name is required').max(160),
@@ -13,7 +13,7 @@ export const customerPaymentSchema = z.object({
   customerId: z.string().min(1),
   saleId: z.string().optional().or(z.literal('')),
   date: dateStringSchema,
-  amount: moneySchema,
+  amount: requiredPositiveMoneySchema,
   paymentMethod: paymentMethodSchema,
   notes: z.string().max(500).optional().or(z.literal('')),
 })

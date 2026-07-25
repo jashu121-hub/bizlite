@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 
 import { CurrencyInput } from '@/components/shared/currency-input'
+import { NumberInput } from '@/components/shared/number-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -93,7 +94,7 @@ export function ProductCostCalculator({
         ? Math.floor(quantityOverride)
         : undefined
     const base = normalizeCostBreakdown(
-      value ?? emptyCostBreakdown(qty && qty > 0 ? qty : 1),
+      value ?? emptyCostBreakdown(qty && qty > 0 ? qty : 0),
     )
     if (qty && qty > 0 && base.productionQuantity !== qty) {
       return normalizeCostBreakdown({ ...base, productionQuantity: qty })
@@ -138,7 +139,11 @@ export function ProductCostCalculator({
   }
 
   const updateMoney = (key: MoneyFieldKey, amount: string) => {
-    const safe = money(amount).isNeg() ? '0' : amount
+    if (amount === '') {
+      update({ [key]: '' })
+      return
+    }
+    const safe = money(amount).isNeg() ? '' : amount
     update({ [key]: safe })
   }
 
@@ -166,15 +171,23 @@ export function ProductCostCalculator({
         <div id={panelId} className="space-y-5 border-t border-zinc-100 px-4 py-4">
           <div className="space-y-2">
             <Label htmlFor={`${panelId}-qty`}>Production or Purchase Quantity</Label>
-            <Input
+            <NumberInput
               id={`${panelId}-qty`}
-              type="number"
-              min={1}
-              step={1}
+              integer
+              min={0}
+              placeholder="0"
               disabled={quantityLocked}
-              value={breakdown.productionQuantity}
-              onChange={(e) => {
-                const qty = Math.max(1, Math.floor(Number(e.target.value) || 1))
+              value={
+                breakdown.productionQuantity === 0 || breakdown.productionQuantity == null
+                  ? ''
+                  : breakdown.productionQuantity
+              }
+              onChange={(value) => {
+                if (value === '') {
+                  update({ productionQuantity: 0 })
+                  return
+                }
+                const qty = Math.max(0, Math.floor(Number(value) || 0))
                 update({ productionQuantity: qty })
               }}
             />
@@ -220,7 +233,10 @@ export function ProductCostCalculator({
                     onChange={(amount) => {
                       const customProductionCosts = breakdown.customProductionCosts.map((item, i) =>
                         i === index
-                          ? { ...item, amount: money(amount).isNeg() ? '0' : amount }
+                          ? {
+                              ...item,
+                              amount: amount === '' || money(amount).isNeg() ? '' : amount,
+                            }
                           : item,
                       )
                       update({ customProductionCosts })
@@ -251,7 +267,7 @@ export function ProductCostCalculator({
                   update({
                     customProductionCosts: [
                       ...breakdown.customProductionCosts,
-                      { id: newCustomId(), name: '', amount: '0' },
+                      { id: newCustomId(), name: '', amount: '' },
                     ],
                   })
                 }

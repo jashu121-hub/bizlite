@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { dateStringSchema, moneySchema, paymentMethodSchema } from './common'
+import { dateStringSchema, paymentMethodSchema, requiredPositiveMoneySchema } from './common'
 
 export const expenseCostTypeSchema = z.enum(['PRODUCTION', 'SELLING', 'OVERHEAD'])
 export const expenseSchema = z
@@ -8,7 +8,7 @@ export const expenseSchema = z
     categoryId: z.string().min(1, 'Select a category'),
     costType: expenseCostTypeSchema,
     description: z.string().min(1, 'Description is required').max(200),
-    amount: moneySchema,
+    amount: requiredPositiveMoneySchema,
     paymentMethod: paymentMethodSchema,
     vendor: z.string().max(160).optional().or(z.literal('')),
     reference: z.string().max(120).optional().or(z.literal('')),

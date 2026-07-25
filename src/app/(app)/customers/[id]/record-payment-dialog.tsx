@@ -9,6 +9,7 @@ import { recordCustomerPaymentAction } from '@/actions/customers'
 import { customerPaymentSchema, type CustomerPaymentInput } from '@/lib/validations/customer'
 import { todayInputValue } from '@/lib/dates'
 import { PAYMENT_METHODS } from '@/lib/constants'
+import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -99,7 +100,17 @@ export function RecordPaymentDialog({ customerId, currency, pendingSales }: Prop
           </div>
           <div className="space-y-2">
             <Label htmlFor="amount">Amount ({currency})</Label>
-            <Input id="amount" type="number" step="0.01" min="0" {...form.register('amount')} />
+            <CurrencyInput
+              id="amount"
+              currency={currency}
+              value={form.watch('amount')}
+              onChange={(value) =>
+                form.setValue('amount', value, { shouldDirty: true, shouldValidate: true })
+              }
+            />
+            <p className="text-sm text-red-600" role="alert">
+              {String(form.formState.errors.amount?.message ?? '')}
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Payment method</Label>

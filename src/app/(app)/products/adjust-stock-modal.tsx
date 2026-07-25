@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { adjustStockDetailedAction } from '@/actions/products'
 import { ProductModalShell } from '@/app/(app)/products/product-modal-shell'
 import type { ProductRow } from '@/app/(app)/products/products-table'
+import { NumberInput } from '@/components/shared/number-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -124,11 +125,18 @@ export function AdjustStockModal({
           <Label htmlFor="adj-qty">
             {mode === 'SET' ? 'Exact quantity' : 'Adjustment quantity'}
           </Label>
-          <Input
+          <NumberInput
             id="adj-qty"
-            type="number"
+            integer
             min={0}
-            {...form.register('quantity', { valueAsNumber: true })}
+            placeholder="0"
+            value={form.watch('quantity')}
+            onChange={(value) =>
+              form.setValue('quantity', value === '' ? '' : Number(value), {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
           />
           <p className="text-sm text-red-600" role="alert">
             {String(form.formState.errors.quantity?.message ?? '')}
