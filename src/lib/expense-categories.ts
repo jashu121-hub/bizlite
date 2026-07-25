@@ -38,6 +38,9 @@ export async function ensureExpenseCategories(userId: string, tx: Db = prisma) {
     select: { id: true, systemKey: true },
   })
   const byKey = new Map(existing.map((category) => [category.systemKey!, category.id]))
+  // Fast path: system categories already seeded for this user
+  if (DEFAULT_SYSTEM_CATEGORIES.every((item) => byKey.has(item.systemKey))) return
+
   for (const item of DEFAULT_SYSTEM_CATEGORIES) {
     if (byKey.has(item.systemKey)) continue
     const parentId = 'parentSystemKey' in item ? byKey.get(item.parentSystemKey) : undefined
