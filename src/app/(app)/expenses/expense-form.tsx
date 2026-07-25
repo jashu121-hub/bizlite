@@ -1,36 +1,28 @@
 'use client'
 
-import { useEffect, useRef, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useTransition } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import type { ExpenseCategory, ExpenseCostType, ExpenseSubcategory } from '@prisma/client'
+import type { ExpenseCostType } from '@prisma/client'
 
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  EXPENSE_CATEGORIES,
-  EXPENSE_COST_TYPES,
-  PAYMENT_METHODS,
-  TRANSPORT_SUBCATEGORIES,
-} from '@/lib/constants'
+import { EXPENSE_COST_TYPES, PAYMENT_METHODS } from '@/lib/constants'
 import { todayInputValue } from '@/lib/dates'
-import {
-  parseExpenseCostDefaults,
-  suggestCostType,
-  type ExpenseCostDefaultsMap,
-} from '@/lib/expense-cost'
+import { suggestCostType } from '@/lib/expense-cost'
+import type { ExpenseCategoryDTO } from '@/lib/expense-categories'
 import { expenseSchema, type ExpenseInput } from '@/lib/validations/expense'
 import { cn } from '@/lib/utils'
 
 type ExpenseFormProps = {
   currency: string
   initial?: Partial<ExpenseInput>
-  costDefaults?: ExpenseCostDefaultsMap | null
+  categories: ExpenseCategoryDTO[]
   onSubmit: (data: ExpenseInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
@@ -41,7 +33,7 @@ type ExpenseFormProps = {
 export function ExpenseForm({
   currency,
   initial,
-  costDefaults,
+  categories,
   onSubmit,
   onSuccess,
   onCancel,
@@ -50,19 +42,31 @@ export function ExpenseForm({
 }: ExpenseFormProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const defaults = parseExpenseCostDefaults(costDefaults ?? {})
-  const initialCategory = (initial?.category as ExpenseCategory) || 'OTHER'
-  const initialSubcategory = (initial?.subcategory as ExpenseSubcategory | null) ?? null
+
+  const flat = useMemo(
+    () => categories.flatMap((category) => [category, ...(category.children ?? [])]),
+    [categories],
+  )
+
+  const initialSelected =
+    flat.find((category) => category.id === initial?.categoryId) ??
+    categories.find((category) => !category.isTransport && !category.isArchived) ??
+    categories[0]
+
+  const initialTopLevelId = initialSelected?.parentId
+    ? initialSelected.parentId
+    : initialSelected?.id ?? ''
+
   const initialCostType =
     (initial?.costType as ExpenseCostType | undefined) ||
-    suggestCostType(initialCategory, initialSubcategory, defaults) ||
+    suggestCostType(initialSelected) ||
     'OVERHEAD'
 
   const form = useForm<any>({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
       date: todayInputValue(),
-      category: 'OTHER',
+      categoryId: initialSelected?.id ?? '',
       description: '',
       amount: '0',
       paymentMethod: 'CASH',
@@ -71,12 +75,17 @@ export function ExpenseForm({
       notes: '',
       ...initial,
       costType: initial?.costType || initialCostType,
-      subcategory: initial?.subcategory ?? null,
     },
   })
 
-  const category = form.watch('category') as ExpenseCategory
-  const subcategory = form.watch('subcategory') as ExpenseSubcategory | null
+  const categoryId = form.watch('categoryId') as string
+  const selected = flat.find((item) => item.id === categoryId)
+  const topLevelId = selected?.parentId ?? (selected?.isTransport ? selected.id : selected?.id) ?? initialTopLevelId
+  const topLevel = categories.find((item) => item.id === topLevelId)
+  const transportChildren = (topLevel?.children ?? []).filter((item) => !item.isArchived)
+  const isTransport = !!topLevel?.isTransport
+  const leafSelected = selected && !selected.isTransport ? selected : null
+  const costLocked = !!(leafSelected?.parentId && leafSelected.defaultCostType)
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty)
@@ -88,25 +97,19 @@ export function ExpenseForm({
       skipSuggest.current = false
       return
     }
-    if (category !== 'TRANSPORT') {
-      if (form.getValues('subcategory')) {
-        form.setValue('subcategory', null, { shouldDirty: true })
-      }
-      const suggested = suggestCostType(category, null, defaults)
-      if (suggested) {
-        form.setValue('costType', suggested, { shouldValidate: true, shouldDirty: true })
-      }
-      return
-    }
-    const suggested = suggestCostType('TRANSPORT', subcategory, defaults)
+    const suggested = suggestCostType(leafSelected)
     if (suggested) {
       form.setValue('costType', suggested, { shouldValidate: true, shouldDirty: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, subcategory])
+  }, [categoryId])
 
   const submit = (data: ExpenseInput) =>
     startTransition(async () => {
+      if (isTransport && (!selected || selected.isTransport)) {
+        toast.error('Select Inward Transport, Customer Delivery, or General Transport')
+        return
+      }
       const result = await onSubmit(data)
       if (!result.success) {
         toast.error(result.error)
@@ -128,33 +131,47 @@ export function ExpenseForm({
         <Field label="Date" error={String(form.formState.errors.date?.message ?? '')}>
           <Input type="date" {...form.register('date')} />
         </Field>
-        <Field label="Category" error={String(form.formState.errors.category?.message ?? '')}>
+        <Field label="Category" error={String(form.formState.errors.categoryId?.message ?? '')}>
           <select
             className="h-10 w-full rounded-md border bg-transparent px-3"
-            {...form.register('category')}
+            value={topLevelId}
+            onChange={(event) => {
+              const next = categories.find((item) => item.id === event.target.value)
+              if (!next) return
+              if (next.isTransport) {
+                form.setValue('categoryId', next.id, { shouldDirty: true, shouldValidate: true })
+                return
+              }
+              form.setValue('categoryId', next.id, { shouldDirty: true, shouldValidate: true })
+            }}
           >
-            {EXPENSE_CATEGORIES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
+            <option value="">Select a category…</option>
+            {categories.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+                {item.isArchived ? ' (archived)' : ''}
               </option>
             ))}
           </select>
         </Field>
       </div>
 
-      {category === 'TRANSPORT' ? (
-        <Field
-          label="Transport type"
-          error={String(form.formState.errors.subcategory?.message ?? '')}
-        >
+      {isTransport ? (
+        <Field label="Transport type" error={String(form.formState.errors.categoryId?.message ?? '')}>
           <select
             className="h-10 w-full rounded-md border bg-transparent px-3"
-            {...form.register('subcategory')}
+            value={selected?.parentId ? selected.id : ''}
+            onChange={(event) =>
+              form.setValue('categoryId', event.target.value, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
           >
             <option value="">Select transport type…</option>
-            {TRANSPORT_SUBCATEGORIES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
+            {transportChildren.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
               </option>
             ))}
           </select>
@@ -164,14 +181,11 @@ export function ExpenseForm({
         </Field>
       ) : null}
 
-      <Field
-        label="Cost Type"
-        error={String(form.formState.errors.costType?.message ?? '')}
-      >
+      <Field label="Cost Type" error={String(form.formState.errors.costType?.message ?? '')}>
         <select
           className="h-10 w-full rounded-md border bg-transparent px-3"
           {...form.register('costType')}
-          disabled={category === 'TRANSPORT'}
+          disabled={costLocked}
         >
           {EXPENSE_COST_TYPES.map((item) => (
             <option key={item.value} value={item.value}>
@@ -179,7 +193,7 @@ export function ExpenseForm({
             </option>
           ))}
         </select>
-        {category === 'TRANSPORT' ? (
+        {costLocked ? (
           <p className="text-xs text-zinc-500">
             Cost type is set automatically from the transport type.
           </p>

@@ -206,7 +206,7 @@ export default async function DashboardPage({
                 <li key={expense.id} className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-zinc-800">
-                      {expenseCategoryLabel(expense.category)}
+                      {expense.category.name}
                     </p>
                     <p className="truncate text-xs text-zinc-500">
                       {expense.description} · {formatDate(expense.date)}

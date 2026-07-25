@@ -1,12 +1,15 @@
-import type { ExpenseCategory, ExpenseCostType, PaymentStatus } from '@prisma/client'
+import type { ExpenseCostType, PaymentStatus } from '@prisma/client'
+import { differenceInCalendarDays, startOfDay } from 'date-fns'
 
-import { prisma } from '@/lib/prisma'
-import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
 import {
-  expenseNeedsClassification,
-  subcategoryLabel,
-} from '@/lib/expense-cost'
-import { expenseCategoryLabel } from '@/lib/labels'
+  getDashboardDateRange,
+  toDashboardDateRangeCompat,
+  toLocalDateInput,
+  type DashboardDateParams,
+} from '@/lib/dashboard-date-range'
+import { prismaDateFilter } from '@/lib/dates'
+import { prisma } from '@/lib/prisma'
+import { expenseNeedsClassification } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, percent, subMoney } from '@/lib/money'
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIALLY_PAID', 'PENDING']
@@ -36,13 +39,34 @@ function buildBreakdown(
     .sort((a, b) => b.amount - a.amount)
 }
 
-export async function getReportsData(
-  userId: string,
-  preset: DateFilterPreset = 'month',
-  customFrom?: string | null,
-  customTo?: string | null,
-) {
-  const range = getDateRange(preset, customFrom, customTo)
+function productMarginStatus(grossProfit: number, salesAmount: number, margin: number) {
+  if (salesAmount <= 0) return 'Healthy' as const
+  if (grossProfit < 0) return 'Loss' as const
+  if (grossProfit === 0 || margin === 0) return 'Zero Margin' as const
+  if (margin < 15) return 'Low Margin' as const
+  if (margin >= 40) return 'High Margin' as const
+  return 'Healthy' as const
+}
+
+function receivableStatus(oldestPending: Date, totalPaid: number, outstanding: number) {
+  const days = differenceInCalendarDays(startOfDay(new Date()), startOfDay(oldestPending))
+  if (outstanding > 0 && totalPaid > 0 && days > 30) return 'Overdue' as const
+  if (days > 30) return 'Overdue' as const
+  if (days > 14) return 'Due Soon' as const
+  if (totalPaid > 0 && outstanding > 0) return 'Partially Paid' as const
+  return 'Current' as const
+}
+
+export async function getReportsData(userId: string, params: DashboardDateParams = {}) {
+  const preset = (params.preset || 'month') as DashboardDateParams['preset']
+  const dashboardRange = getDashboardDateRange({
+    preset: preset || 'month',
+    from: params.from,
+    to: params.to,
+    year: params.year,
+    month: params.month,
+  })
+  const range = toDashboardDateRangeCompat(dashboardRange)
   const dateFilter = prismaDateFilter(range)
   const periodWhere = { userId, ...(dateFilter ? { date: dateFilter } : {}) }
 
@@ -70,16 +94,16 @@ export async function getReportsData(
           },
         },
       },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.expense.findMany({
       where: periodWhere,
       select: {
         id: true,
+        categoryId: true,
         date: true,
-        category: true,
+        category: { select: { id: true, name: true, parentId: true, isTransport: true } },
         costType: true,
-        subcategory: true,
         description: true,
         amount: true,
         paymentMethod: true,
@@ -87,10 +111,10 @@ export async function getReportsData(
         reference: true,
         notes: true,
       },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.product.findMany({
-      where: { userId, isActive: true },
+      where: { userId },
       select: {
         id: true,
         name: true,
@@ -98,18 +122,21 @@ export async function getReportsData(
         lowStockLevel: true,
         costPrice: true,
         sellingPrice: true,
+        isActive: true,
       },
       orderBy: { name: 'asc' },
     }),
     prisma.sale.findMany({
       where: { userId, balancePending: { gt: 0 }, customerId: { not: null } },
       select: {
+        id: true,
         customerId: true,
+        invoiceNumber: true,
         date: true,
         totalAmount: true,
         amountPaid: true,
         balancePending: true,
-        customer: { select: { name: true } },
+        customer: { select: { id: true, name: true } },
       },
       orderBy: { date: 'asc' },
     }),
@@ -117,6 +144,7 @@ export async function getReportsData(
 
   const revenue = addMoney(...sales.map((sale) => sale.totalAmount))
   const inventoryCogs = addMoney(...sales.map((sale) => sale.totalCost))
+  const totalPaidSales = addMoney(...sales.map((sale) => sale.amountPaid))
   const totalExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
 
   const productionMoney = addMoney(
@@ -140,17 +168,27 @@ export async function getReportsData(
       .map((expense) => expense.amount),
   )
 
-  // Profit waterfall uses expense cost classification (not inventory COGS)
+  // Gross / classified operating analysis
   const grossProfit = subMoney(revenue, productionMoney)
   const profitAfterSelling = subMoney(grossProfit, sellingMoney)
-  const netProfit = subMoney(profitAfterSelling, overheadMoney)
+  // Accounting net profit always deducts ALL expenses including unclassified
+  const netProfit = subMoney(revenue, totalExpensesMoney)
 
   const receivables = addMoney(
     ...outstandingSales.map((sale) => sale.balancePending),
   )
+  const activeProducts = products.filter((p) => p.isActive)
   const stockValue = addMoney(
-    ...products.map((product) => money(product.costPrice).times(product.currentStock)),
+    ...activeProducts.map((product) => money(product.costPrice).times(product.currentStock)),
   )
+  const potentialSalesValue = addMoney(
+    ...activeProducts.map((product) => money(product.sellingPrice).times(product.currentStock)),
+  )
+  const potentialGrossProfit = subMoney(potentialSalesValue, stockValue)
+  const lowStockItems = activeProducts.filter(
+    (p) => p.currentStock > 0 && p.currentStock <= p.lowStockLevel,
+  )
+  const outOfStockItems = activeProducts.filter((p) => p.currentStock <= 0)
 
   const paymentStatusCounts = paymentStatuses.reduce(
     (counts, status) => {
@@ -160,20 +198,20 @@ export async function getReportsData(
     {} as Record<PaymentStatus, number>,
   )
 
-  function groupBreakdown(costType: ExpenseCostType) {
-    const group = expenses.filter((expense) => expense.costType === costType)
+  function groupBreakdown(costType: ExpenseCostType | 'UNCLASSIFIED') {
+    const group =
+      costType === 'UNCLASSIFIED'
+        ? expenses.filter((expense) => !expense.costType)
+        : expenses.filter((expense) => expense.costType === costType)
     const groupTotal = addMoney(...group.map((expense) => expense.amount))
-    const buckets = new Map<string, { key: string; label: string; amount: ReturnType<typeof money> }>()
+    const buckets = new Map<
+      string,
+      { key: string; label: string; amount: ReturnType<typeof money> }
+    >()
 
     for (const expense of group) {
-      const key =
-        expense.category === 'TRANSPORT' && expense.subcategory
-          ? expense.subcategory
-          : expense.category
-      const label =
-        expense.category === 'TRANSPORT' && expense.subcategory
-          ? subcategoryLabel(expense.subcategory)
-          : expenseCategoryLabel(expense.category)
+      const key = expense.categoryId
+      const label = expense.category.name
       const current = buckets.get(key) ?? { key, label, amount: money(0) }
       current.amount = current.amount.plus(expense.amount)
       buckets.set(key, current)
@@ -189,14 +227,9 @@ export async function getReportsData(
   const production = groupBreakdown('PRODUCTION')
   const selling = groupBreakdown('SELLING')
   const overhead = groupBreakdown('OVERHEAD')
+  const unclassified = groupBreakdown('UNCLASSIFIED')
 
-  const needsClassification = expenses.filter((expense) =>
-    expenseNeedsClassification(
-      expense.category as ExpenseCategory,
-      expense.costType,
-      expense.subcategory,
-    ),
-  )
+  const needsClassification = expenses.filter((expense) => expenseNeedsClassification(expense.costType))
 
   const productPerformance = new Map<
     string,
@@ -229,6 +262,7 @@ export async function getReportsData(
   const customerReceivables = new Map<
     string,
     {
+      customerId: string
       customer: string
       totalSales: ReturnType<typeof money>
       totalPaid: ReturnType<typeof money>
@@ -239,6 +273,7 @@ export async function getReportsData(
   for (const sale of outstandingSales) {
     if (!sale.customerId || !sale.customer) continue
     const row = customerReceivables.get(sale.customerId) ?? {
+      customerId: sale.customerId,
       customer: sale.customer.name,
       totalSales: money(0),
       totalPaid: money(0),
@@ -248,33 +283,153 @@ export async function getReportsData(
     row.totalSales = row.totalSales.plus(sale.totalAmount)
     row.totalPaid = row.totalPaid.plus(sale.amountPaid)
     row.outstanding = row.outstanding.plus(sale.balancePending)
+    if (sale.date < row.oldestPendingSaleDate) row.oldestPendingSaleDate = sale.date
     customerReceivables.set(sale.customerId, row)
   }
 
   const salesRevenue = moneyNumber(revenue)
   const hasRevenue = money(revenue).gt(0)
+  const netProfitNumber = moneyNumber(netProfit)
+  const grossProfitNumber = moneyNumber(grossProfit)
+
+  const productRows = [...productPerformance.values()]
+    .map((row) => {
+      const salesAmount = moneyNumber(row.salesAmount)
+      const cost = moneyNumber(row.cost)
+      const gp = moneyNumber(row.grossProfit)
+      const margin = moneyNumber(percent(row.grossProfit, row.salesAmount))
+      return {
+        product: row.product,
+        quantitySold: row.quantitySold,
+        salesAmount,
+        cost,
+        grossProfit: gp,
+        margin,
+        status: productMarginStatus(gp, salesAmount, margin),
+      }
+    })
+    .sort((a, b) => b.salesAmount - a.salesAmount)
+
+  const receivableRows = [...customerReceivables.values()]
+    .map((row) => {
+      const totalPaid = moneyNumber(row.totalPaid)
+      const outstanding = moneyNumber(row.outstanding)
+      return {
+        customerId: row.customerId,
+        customer: row.customer,
+        totalSales: moneyNumber(row.totalSales),
+        totalPaid,
+        outstanding,
+        oldestPendingSaleDate: row.oldestPendingSaleDate.toISOString(),
+        status: receivableStatus(row.oldestPendingSaleDate, totalPaid, outstanding),
+      }
+    })
+    .sort((a, b) => b.outstanding - a.outstanding)
+
+  const overdueAmount = moneyNumber(
+    addMoney(
+      ...receivableRows
+        .filter((row) => row.status === 'Overdue')
+        .map((row) => row.outstanding),
+    ),
+  )
+
+  const zeroMarginProducts = productRows.filter((p) => p.status === 'Zero Margin')
+  const lossProducts = productRows.filter((p) => p.status === 'Loss')
+
+  const alerts = [
+    needsClassification.length > 0
+      ? {
+          id: 'unclassified',
+          tone: 'warning' as const,
+          message: `${needsClassification.length} expense${needsClassification.length === 1 ? '' : 's'} require classification — ${moneyNumber(unclassifiedMoney).toFixed(2)}`,
+          href: '/expenses?needsClassification=1',
+          tab: 'expenses' as const,
+        }
+      : null,
+    lowStockItems.length > 0
+      ? {
+          id: 'low-stock',
+          tone: 'warning' as const,
+          message: `${lowStockItems.length} low-stock product${lowStockItems.length === 1 ? '' : 's'}`,
+          href: '/products?stock=low',
+          tab: 'inventory' as const,
+        }
+      : null,
+    receivableRows.length > 0
+      ? {
+          id: 'receivables',
+          tone: 'warning' as const,
+          message: `${receivableRows.length} customer${receivableRows.length === 1 ? '' : 's'} have outstanding payments`,
+          href: null,
+          tab: 'receivables' as const,
+        }
+      : null,
+    ...zeroMarginProducts.slice(0, 2).map((p) => ({
+      id: `zero-${p.product}`,
+      tone: 'warning' as const,
+      message: `${p.product} has 0% gross margin`,
+      href: null,
+      tab: 'products' as const,
+    })),
+    ...lossProducts.slice(0, 2).map((p) => ({
+      id: `loss-${p.product}`,
+      tone: 'danger' as const,
+      message: `${p.product} is loss-making`,
+      href: null,
+      tab: 'products' as const,
+    })),
+    hasRevenue && netProfitNumber < 0
+      ? {
+          id: 'negative-margin',
+          tone: 'danger' as const,
+          message: 'Net margin is negative',
+          href: null,
+          tab: 'profitability' as const,
+        }
+      : null,
+  ].filter(Boolean) as {
+    id: string
+    tone: 'warning' | 'danger'
+    message: string
+    href: string | null
+    tab: 'expenses' | 'inventory' | 'receivables' | 'products' | 'profitability'
+  }[]
 
   return {
-    range,
+    range: {
+      preset: dashboardRange.periodType,
+      label: dashboardRange.displayLabel,
+      from: dashboardRange.startDate ? toLocalDateInput(dashboardRange.startDate) : null,
+      to: dashboardRange.endDate ? toLocalDateInput(dashboardRange.endDate) : null,
+      year: dashboardRange.year,
+      month: dashboardRange.month,
+    },
     summary: {
       sales: salesRevenue,
       expenses: moneyNumber(totalExpensesMoney),
       productionCost: production.total,
       sellingCost: selling.total,
       overheadCost: overhead.total,
-      grossProfit: moneyNumber(grossProfit),
-      netProfit: moneyNumber(netProfit),
+      unclassifiedCost: unclassified.total,
+      grossProfit: grossProfitNumber,
+      netProfit: netProfitNumber,
+      grossMargin: hasRevenue ? moneyNumber(percent(grossProfit, revenue)) : null,
+      netMargin: hasRevenue ? moneyNumber(percent(netProfit, revenue)) : null,
       customerReceivables: moneyNumber(receivables),
+      receivablesCustomers: receivableRows.length,
       stockValue: moneyNumber(stockValue),
     },
     sales: {
       totalSales: salesRevenue,
       count: sales.length,
       averageSale: moneyNumber(sales.length ? revenue.div(sales.length) : 0),
+      totalPaid: moneyNumber(totalPaidSales),
       byPaymentStatus: paymentStatusCounts,
       rows: sales.map((sale) => ({
+        id: sale.id,
         invoiceNumber: sale.invoiceNumber,
-        date: sale.date,
+        date: sale.date.toISOString(),
         customer: sale.customer?.name ?? 'Walk-in customer',
         totalAmount: moneyNumber(sale.totalAmount),
         amountPaid: moneyNumber(sale.amountPaid),
@@ -289,84 +444,78 @@ export async function getReportsData(
       production,
       selling,
       overhead,
-      unclassifiedTotal: moneyNumber(unclassifiedMoney),
+      unclassified,
+      unclassifiedTotal: unclassified.total,
       needsClassificationCount: needsClassification.length,
-      byCategory: (() => {
-        const map = new Map<string, ReturnType<typeof money>>()
-        for (const expense of expenses) {
-          map.set(
-            expense.category,
-            money(map.get(expense.category) ?? 0).plus(expense.amount),
-          )
-        }
-        return [...map.entries()]
-          .map(([category, total]) => ({ category, total: moneyNumber(total) }))
-          .sort((a, b) => b.total - a.total)
-      })(),
       rows: expenses.map((expense) => ({
-        date: expense.date,
-        category: expense.category,
+        id: expense.id,
+        date: expense.date.toISOString(),
+        category: expense.category.name,
+        categoryName: expense.category.name,
         costType: expense.costType,
-        subcategory: expense.subcategory,
         description: expense.description,
         amount: moneyNumber(expense.amount),
         paymentMethod: expense.paymentMethod,
         vendor: expense.vendor,
         reference: expense.reference,
         notes: expense.notes,
-        needsClassification: expenseNeedsClassification(
-          expense.category as ExpenseCategory,
-          expense.costType,
-          expense.subcategory,
-        ),
+        needsClassification: expenseNeedsClassification(expense.costType),
       })),
     },
     profit: {
       revenue: salesRevenue,
       productionCost: production.total,
-      grossProfit: moneyNumber(grossProfit),
+      grossProfit: grossProfitNumber,
       sellingCost: selling.total,
       profitAfterSelling: moneyNumber(profitAfterSelling),
       overheadCost: overhead.total,
-      netProfit: moneyNumber(netProfit),
+      unclassifiedCost: unclassified.total,
+      netProfit: netProfitNumber,
       grossMargin: hasRevenue ? moneyNumber(percent(grossProfit, revenue)) : null,
       netMargin: hasRevenue ? moneyNumber(percent(netProfit, revenue)) : null,
       inventoryCogs: moneyNumber(inventoryCogs),
     },
-    productPerformance: [...productPerformance.values()]
-      .map((row) => ({
-        product: row.product,
-        quantitySold: row.quantitySold,
-        salesAmount: moneyNumber(row.salesAmount),
-        cost: moneyNumber(row.cost),
-        grossProfit: moneyNumber(row.grossProfit),
-        margin: moneyNumber(percent(row.grossProfit, row.salesAmount)),
-      }))
-      .sort((a, b) => b.salesAmount - a.salesAmount),
-    customerReceivables: [...customerReceivables.values()]
-      .map((row) => ({
-        customer: row.customer,
-        totalSales: moneyNumber(row.totalSales),
-        totalPaid: moneyNumber(row.totalPaid),
-        outstanding: moneyNumber(row.outstanding),
-        oldestPendingSaleDate: row.oldestPendingSaleDate,
-      }))
-      .sort((a, b) => b.outstanding - a.outstanding),
-    inventory: products.map((product) => ({
-      product: product.name,
-      currentStock: product.currentStock,
-      costPrice: moneyNumber(product.costPrice),
-      sellingPrice: moneyNumber(product.sellingPrice),
-      stockCostValue: moneyNumber(money(product.costPrice).times(product.currentStock)),
-      potentialSellingValue: moneyNumber(
-        money(product.sellingPrice).times(product.currentStock),
-      ),
-      stockStatus:
-        product.currentStock <= 0
-          ? 'Out of Stock'
-          : product.currentStock <= product.lowStockLevel
-            ? 'Low Stock'
-            : 'In Stock',
-    })),
+    productPerformance: productRows,
+    customerReceivables: receivableRows,
+    receivablesSummary: {
+      total: moneyNumber(receivables),
+      customers: receivableRows.length,
+      overdueAmount,
+      oldestPendingSaleDate: receivableRows[0]?.oldestPendingSaleDate ?? null,
+    },
+    inventory: {
+      isCurrent: true,
+      stockValue: moneyNumber(stockValue),
+      potentialSalesValue: moneyNumber(potentialSalesValue),
+      potentialGrossProfit: moneyNumber(potentialGrossProfit),
+      lowStockCount: lowStockItems.length,
+      outOfStockCount: outOfStockItems.length,
+      rows: products.map((product) => {
+        const stockCostValue = moneyNumber(money(product.costPrice).times(product.currentStock))
+        const potentialSellingValue = moneyNumber(
+          money(product.sellingPrice).times(product.currentStock),
+        )
+        return {
+          id: product.id,
+          product: product.name,
+          currentStock: product.currentStock,
+          costPrice: moneyNumber(product.costPrice),
+          sellingPrice: moneyNumber(product.sellingPrice),
+          stockCostValue,
+          potentialSellingValue,
+          potentialGrossProfit: moneyNumber(
+            money(potentialSellingValue).minus(stockCostValue),
+          ),
+          isActive: product.isActive,
+          stockStatus:
+            product.currentStock <= 0
+              ? ('Out of Stock' as const)
+              : product.currentStock <= product.lowStockLevel
+                ? ('Low Stock' as const)
+                : ('In Stock' as const),
+        }
+      }),
+    },
+    alerts,
   }
 }

@@ -1,12 +1,13 @@
-import { ExpenseCostDefaultsForm } from '@/components/settings/expense-cost-defaults-form'
+import { ExpenseCategoryManager } from '@/components/settings/expense-categories/ExpenseCategoryManager'
 import { SettingsForm } from '@/components/settings/settings-form'
 import { PageHeader } from '@/components/shared/page-header'
 import { DEFAULT_CURRENCY } from '@/lib/constants'
 import { requireProfile } from '@/lib/auth'
-import { parseExpenseCostDefaults } from '@/lib/expense-cost'
+import { listExpenseCategories } from '@/lib/expense-categories'
 
 export default async function SettingsPage() {
-  const { profile } = await requireProfile()
+  const { profile, user } = await requireProfile()
+  const categories = await listExpenseCategories(user.id, { includeArchived: true })
 
   return (
     <div className="space-y-6">
@@ -22,8 +23,9 @@ export default async function SettingsPage() {
           currency: profile.currency ?? DEFAULT_CURRENCY,
         }}
       />
-      <ExpenseCostDefaultsForm
-        initialDefaults={parseExpenseCostDefaults(profile.expenseCostDefaults)}
+      <ExpenseCategoryManager
+        initialCategories={categories}
+        currency={profile.currency ?? DEFAULT_CURRENCY}
       />
     </div>
   )

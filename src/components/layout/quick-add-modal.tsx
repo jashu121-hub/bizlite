@@ -44,13 +44,13 @@ export function QuickAddModal() {
     confirmDiscard,
     continueEditing,
     currency,
-    expenseCostDefaults,
   } = useQuickAdd()
 
   const [loading, setLoading] = React.useState(false)
   const [options, setOptions] = React.useState<{
     products: ProductOption[]
     customers: CustomerOption[]
+    categories: import('@/lib/expense-categories').ExpenseCategoryDTO[]
     currency: string
   } | null>(null)
 
@@ -156,7 +156,7 @@ export function QuickAddModal() {
               <ExpenseForm
                 key="quick-expense"
                 currency={options.currency || currency}
-                costDefaults={expenseCostDefaults}
+                categories={options.categories}
                 onSubmit={createExpenseAction}
                 onSuccess={closeQuickAdd}
                 onCancel={requestCloseQuickAdd}

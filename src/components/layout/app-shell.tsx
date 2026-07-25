@@ -5,7 +5,6 @@ import { MobileBottomNavigation } from '@/components/layout/mobile-bottom-nav'
 import { QuickAdd } from '@/components/layout/quick-add'
 import { QuickAddProvider } from '@/components/layout/quick-add-context'
 import { OfflineBanner } from '@/components/shared/offline-banner'
-import type { ExpenseCostDefaultsMap } from '@/lib/expense-cost'
 import { cn } from '@/lib/utils'
 
 interface AppShellProps {
@@ -14,7 +13,6 @@ interface AppShellProps {
   ownerName?: string | null
   email?: string | null
   currency: string
-  expenseCostDefaults?: ExpenseCostDefaultsMap
 }
 
 export function AppShell({
@@ -23,10 +21,9 @@ export function AppShell({
   ownerName,
   email,
   currency,
-  expenseCostDefaults,
 }: AppShellProps) {
   return (
-    <QuickAddProvider currency={currency} expenseCostDefaults={expenseCostDefaults}>
+    <QuickAddProvider currency={currency}>
       <div className="flex h-screen w-full max-w-none overflow-hidden bg-[#f3f6f5]">
         <DesktopSidebar ownerName={ownerName} email={email} />
 

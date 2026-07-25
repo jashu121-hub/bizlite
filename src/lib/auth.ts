@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { prisma } from './prisma'
 import { createClient } from './supabase/server'
+import { ensureExpenseCategories } from './expense-categories'
 
 export async function getSessionUser() {
   const supabase = await createClient()
@@ -31,6 +32,7 @@ export async function requireProfile() {
         email: user.email ?? '',
       },
     })
+    await ensureExpenseCategories(user.id)
     redirect('/setup')
   }
   if (!profile.setupCompleted) redirect('/setup')
@@ -38,9 +40,11 @@ export async function requireProfile() {
 }
 
 export async function ensureProfile(userId: string, email: string) {
-  return prisma.userProfile.upsert({
+  const profile = await prisma.userProfile.upsert({
     where: { id: userId },
     update: { email },
     create: { id: userId, email },
   })
+  await ensureExpenseCategories(userId)
+  return profile
 }

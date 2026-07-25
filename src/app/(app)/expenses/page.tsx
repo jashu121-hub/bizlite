@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { ExpenseList } from './expense-list'
 import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
+import { listExpenseCategories } from '@/lib/expense-categories'
 
 export default async function ExpensesPage({
   searchParams,
@@ -23,21 +24,28 @@ export default async function ExpensesPage({
   const range = preset ? getDateRange(preset, value('from'), value('to')) : null
   const dateFilter = range ? prismaDateFilter(range) : undefined
 
+  const needsClassification = value('needsClassification') === '1'
+
   const where = {
     userId: user.id,
     ...(q ? { description: { contains: q, mode: 'insensitive' as const } } : {}),
-    ...(category ? { category: category as never } : {}),
+    ...(category ? { categoryId: category } : {}),
     ...(dateFilter ? { date: dateFilter } : {}),
+    ...(needsClassification
+      ? { costType: null }
+      : {}),
   }
 
-  const [expenses, total] = await Promise.all([
+  const [expenses, total, categories] = await Promise.all([
     prisma.expense.findMany({
       where,
       orderBy: { date: 'desc' },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
+      include: { category: { select: { id: true, name: true } } },
     }),
     prisma.expense.count({ where }),
+    listExpenseCategories(user.id, { activeOnlyForForms: true }),
   ])
 
   return (
@@ -53,7 +61,7 @@ export default async function ExpensesPage({
           </Button>
         }
       />
-      <ExpenseList expenses={expenses} total={total} page={page} currency={profile.currency} />
+      <ExpenseList expenses={expenses} categories={categories} total={total} page={page} currency={profile.currency} />
     </div>
   )
 }

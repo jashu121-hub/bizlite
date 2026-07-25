@@ -20,7 +20,6 @@ import {
   type DashboardDateParams,
 } from '@/lib/dashboard-date-range'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
-import { expenseCategoryLabel } from '@/lib/labels'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
 async function sumSales(
@@ -176,7 +175,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   })
   const periodExpenses = await prisma.expense.findMany({
     where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
-    select: { id: true, date: true, amount: true, category: true, description: true },
+    select: { id: true, date: true, amount: true, category: { select: { name: true } }, description: true },
     orderBy: { date: 'desc' },
   })
   const products = await prisma.product.findMany({
@@ -200,6 +199,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     take: 5,
+    include: { category: { select: { name: true } } },
   })
 
   const pendingWhere = {
@@ -255,7 +255,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
 
   const expenseByCategory = new Map<string, number>()
   for (const exp of periodExpenses) {
-    const label = expenseCategoryLabel(exp.category)
+    const label = exp.category.name
     expenseByCategory.set(
       label,
       moneyNumber(money(expenseByCategory.get(label) || 0).plus(exp.amount)),

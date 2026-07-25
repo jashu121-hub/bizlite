@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client'
 import { createClient } from '@supabase/supabase-js'
+import { ensureExpenseCategories } from '../src/lib/expense-categories'
 
 const prisma = new PrismaClient()
 const email = 'demo@bizlite.app'
@@ -67,6 +68,7 @@ async function main() {
     await tx.stockMovement.deleteMany({ where: { userId } })
     await tx.sale.deleteMany({ where: { userId } })
     await tx.expense.deleteMany({ where: { userId } })
+    await tx.expenseCategoryItem.deleteMany({ where: { userId } })
     await tx.customer.deleteMany({ where: { userId } })
     await tx.product.deleteMany({ where: { userId } })
 
@@ -88,6 +90,11 @@ async function main() {
         currency: 'AED',
       },
     })
+    await ensureExpenseCategories(userId, tx)
+    const categoryIds = new Map(
+      (await tx.expenseCategoryItem.findMany({ where: { userId }, select: { id: true, systemKey: true } }))
+        .map((category) => [category.systemKey!, category.id]),
+    )
 
     const createdProducts = await Promise.all(
       products.map((product) =>
@@ -258,7 +265,7 @@ async function main() {
       data: expenses.map(([date, category, description, amount], index) => ({
         userId,
         date: new Date(`${date}T12:00:00.000Z`),
-        category,
+        categoryId: categoryIds.get(category === 'TRANSPORT' ? 'CUSTOMER_DELIVERY' : category)!,
         description,
         amount: decimal(amount),
         paymentMethod: index % 2 === 0 ? 'CARD' : 'BANK_TRANSFER',

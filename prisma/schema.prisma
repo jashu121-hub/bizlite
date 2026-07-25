@@ -22,28 +22,10 @@ enum PaymentStatus {
   PENDING
 }
 
-enum ExpenseCategory {
-  MATERIALS
-  TRANSPORT
-  RENT
-  UTILITIES
-  PACKAGING
-  MARKETING
-  SALARY
-  MAINTENANCE
-  OTHER
-}
-
 enum ExpenseCostType {
   PRODUCTION
   SELLING
   OVERHEAD
-}
-
-enum ExpenseSubcategory {
-  INWARD_TRANSPORT
-  CUSTOMER_DELIVERY
-  GENERAL_TRANSPORT
 }
 
 enum StockMovementType {
@@ -70,10 +52,36 @@ model UserProfile {
   customers         Customer[]
   sales             Sale[]
   expenses          Expense[]
+  expenseCategories ExpenseCategoryItem[]
   customerPayments  CustomerPayment[]
   stockMovements    StockMovement[]
 
   @@index([email])
+}
+
+model ExpenseCategoryItem {
+  id              String           @id @default(cuid())
+  userId          String           @db.Uuid
+  name            String
+  defaultCostType ExpenseCostType?
+  isArchived      Boolean          @default(false)
+  isTransport     Boolean          @default(false)
+  parentId        String?
+  systemKey       String?
+  sortOrder       Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user     UserProfile           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent   ExpenseCategoryItem?  @relation("CategoryChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children ExpenseCategoryItem[] @relation("CategoryChildren")
+  expenses Expense[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([userId, isArchived])
+  @@index([userId, parentId])
+  @@index([userId, systemKey])
 }
 
 model Product {
@@ -194,27 +202,28 @@ model CustomerPayment {
 }
 
 model Expense {
-  id            String              @id @default(cuid())
-  userId        String              @db.Uuid
-  date          DateTime            @db.Date
-  category      ExpenseCategory
+  id            String           @id @default(cuid())
+  userId        String           @db.Uuid
+  date          DateTime         @db.Date
+  categoryId    String
   costType      ExpenseCostType?
-  subcategory   ExpenseSubcategory?
   description   String
-  amount        Decimal             @db.Decimal(14, 2)
-  paymentMethod PaymentMethod       @default(CASH)
+  amount        Decimal          @db.Decimal(14, 2)
+  paymentMethod PaymentMethod    @default(CASH)
   vendor        String?
   reference     String?
   notes         String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     UserProfile         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category ExpenseCategoryItem @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([userId, date])
-  @@index([userId, category])
+  @@index([userId, categoryId])
   @@index([userId, costType])
+  @@index([categoryId])
 }
 
 model StockMovement {

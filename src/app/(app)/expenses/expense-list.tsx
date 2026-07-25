@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { Pencil, Trash2 } from 'lucide-react'
 import type { Expense } from '@prisma/client'
+import type { ExpenseCategoryDTO } from '@/lib/expense-categories'
 
 import { deleteExpenseAction } from '@/actions/expenses'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
@@ -15,19 +16,17 @@ import { Button } from '@/components/ui/button'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { formatDate } from '@/lib/dates'
 import { expenseNeedsClassification } from '@/lib/expense-cost'
-import {
-  expenseCategoryLabel,
-  expenseCostTypeLabel,
-  paymentMethodLabel,
-} from '@/lib/labels'
+import { expenseCostTypeLabel, paymentMethodLabel } from '@/lib/labels'
 
 export function ExpenseList({
   expenses,
+  categories,
   total,
   page,
   currency,
 }: {
-  expenses: Expense[]
+  expenses: (Expense & { category: { id: string; name: string } })[]
+  categories: ExpenseCategoryDTO[]
   total: number
   page: number
   currency: string
@@ -48,9 +47,7 @@ export function ExpenseList({
     } else toast.error(result.error)
   }
 
-  const needsCount = expenses.filter((row) =>
-    expenseNeedsClassification(row.category, row.costType, row.subcategory),
-  ).length
+  const needsCount = expenses.filter((row) => expenseNeedsClassification(row.costType)).length
 
   const actions = (row: Expense) => (
     <div className="flex justify-end gap-1">
@@ -99,18 +96,10 @@ export function ExpenseList({
         >
           <option value="all">All categories</option>
           {[
-            'MATERIALS',
-            'TRANSPORT',
-            'RENT',
-            'UTILITIES',
-            'PACKAGING',
-            'MARKETING',
-            'SALARY',
-            'MAINTENANCE',
-            'OTHER',
+            ...categories.flatMap((item) => [item, ...(item.children ?? [])]),
           ].map((v) => (
-            <option key={v} value={v}>
-              {expenseCategoryLabel(v as never)}
+            <option key={v.id} value={v.id}>
+              {v.name}
             </option>
           ))}
         </select>
@@ -122,13 +111,13 @@ export function ExpenseList({
           {
             key: 'category',
             header: 'Category',
-            cell: (r) => expenseCategoryLabel(r.category),
+            cell: (r) => r.category.name,
           },
           {
             key: 'costType',
             header: 'Cost Type',
             cell: (r) => {
-              const needs = expenseNeedsClassification(r.category, r.costType, r.subcategory)
+              const needs = expenseNeedsClassification(r.costType)
               return needs ? (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                   Needs Classification
@@ -154,8 +143,8 @@ export function ExpenseList({
               <CurrencyDisplay value={r.amount} currency={currency} />
             </div>
             <p className="text-sm text-zinc-500">
-              {formatDate(r.date)} · {expenseCategoryLabel(r.category)} ·{' '}
-              {expenseNeedsClassification(r.category, r.costType, r.subcategory)
+              {formatDate(r.date)} · {r.category.name} ·{' '}
+              {expenseNeedsClassification(r.costType)
                 ? 'Needs Classification'
                 : expenseCostTypeLabel(r.costType)}{' '}
               · {paymentMethodLabel(r.paymentMethod)}

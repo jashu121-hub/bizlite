@@ -1,5 +1,4 @@
 import { format, startOfDay } from 'date-fns'
-import { expenseCategoryLabel } from '@/lib/labels'
 import { addMoney, money, moneyNumber, type MoneyInput } from '@/lib/money'
 import type { DateFilterPreset } from '@/lib/dates'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
@@ -67,7 +66,7 @@ type ExpenseRow = {
   id: string
   date: Date
   amount: MoneyInput
-  category: string
+  category: { name: string }
   description: string
 }
 
@@ -135,7 +134,7 @@ export function buildKpiSummaries(input: {
   const expenseCount = input.periodExpenseRows.length
   const expenseByCategory = new Map<string, number>()
   for (const exp of input.periodExpenseRows) {
-    const label = expenseCategoryLabel(exp.category as never)
+    const label = exp.category.name
     expenseByCategory.set(
       label,
       moneyNumber(money(expenseByCategory.get(label) || 0).plus(money(exp.amount))),
