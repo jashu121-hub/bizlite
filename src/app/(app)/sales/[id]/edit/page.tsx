@@ -55,8 +55,19 @@ export default async function EditSalePage({
         })
       : []
 
+  // Add back quantities already on this sale so stock validation allows the current lines
+  const reservedByProduct = new Map<string, number>()
+  for (const item of sale.items) {
+    if (!item.productId) continue
+    reservedByProduct.set(
+      item.productId,
+      (reservedByProduct.get(item.productId) ?? 0) + item.quantity,
+    )
+  }
+
   const productOptions = [...products, ...extraProducts].map((product) => ({
     ...product,
+    currentStock: product.currentStock + (reservedByProduct.get(product.id) ?? 0),
     sellingPrice: product.sellingPrice.toString(),
   }))
 
@@ -80,7 +91,7 @@ export default async function EditSalePage({
           paymentMethod: sale.paymentMethod,
           notes: sale.notes ?? '',
         }}
-        onSubmit={(data) => updateSaleAction(id, data)}
+        onSubmit={updateSaleAction.bind(null, id)}
       />
     </div>
   )

@@ -97,7 +97,7 @@ export default async function EditExpensePage({
           reference: expense.reference ?? '',
           notes: expense.notes ?? '',
         }}
-        onSubmit={(data) => updateExpenseAction(id, data)}
+        onSubmit={updateExpenseAction.bind(null, id)}
       />
     </div>
   )

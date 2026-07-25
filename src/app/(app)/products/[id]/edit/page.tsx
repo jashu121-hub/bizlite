@@ -35,7 +35,7 @@ export default async function EditProductPage({
           isActive: p.isActive,
           costBreakdown: parseCostBreakdown(p.costBreakdown),
         }}
-        onSubmit={(data) => updateProductAction(id, data)}
+        onSubmit={updateProductAction.bind(null, id)}
       />
     </div>
   )
