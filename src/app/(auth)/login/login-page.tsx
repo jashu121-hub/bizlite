@@ -17,6 +17,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { friendlyAuthError } from '@/lib/auth-errors'
 import { createClient } from '@/lib/supabase/client'
 import { loginSchema, type LoginInput } from '@/lib/validations/auth'
 
@@ -43,7 +44,7 @@ export default function LoginPage() {
       })
 
       if (error) {
-        toast.error(error.message)
+        toast.error(friendlyAuthError(error.message))
         return
       }
 
@@ -51,8 +52,10 @@ export default function LoginPage() {
       const next = searchParams.get('next')
       router.push(next && next.startsWith('/') ? next : '/dashboard')
       router.refresh()
-    } catch {
-      toast.error('Unable to sign in. Please try again.')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to sign in. Please try again.'
+      toast.error(friendlyAuthError(message))
     } finally {
       setSubmitting(false)
     }

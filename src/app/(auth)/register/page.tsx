@@ -18,6 +18,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { friendlyAuthError } from '@/lib/auth-errors'
 import { createClient } from '@/lib/supabase/client'
 import { registerSchema, type RegisterInput } from '@/lib/validations/auth'
 
@@ -44,7 +45,7 @@ export default function RegisterPage() {
       })
 
       if (error) {
-        toast.error(error.message)
+        toast.error(friendlyAuthError(error.message))
         return
       }
 
@@ -55,12 +56,12 @@ export default function RegisterPage() {
 
       const profileResult = await ensureProfileAction(data.user.id, values.email)
       if (!profileResult.success) {
-        toast.error(profileResult.error)
+        toast.error(friendlyAuthError(profileResult.error))
         return
       }
 
       if (!data.session) {
-        toast.success('Check your email to confirm your account, then sign in.')
+        toast.success('Account created. If email confirmation is on, check your inbox, then sign in.')
         router.push('/login')
         return
       }
@@ -71,11 +72,7 @@ export default function RegisterPage() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to create account. Please try again.'
-      toast.error(
-        message.includes('fetch') || message.includes('Supabase is not configured')
-          ? 'Server not connected. Add Supabase keys in Vercel Environment Variables, then redeploy.'
-          : message,
-      )
+      toast.error(friendlyAuthError(message))
     } finally {
       setSubmitting(false)
     }
