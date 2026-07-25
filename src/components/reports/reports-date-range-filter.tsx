@@ -3,24 +3,39 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { DateRangeFilter } from '@/components/shared/date-range-filter'
-import type { DateRange } from '@/lib/dates'
+import { getDateRange, type DateFilterPreset, type DateRange } from '@/lib/dates'
+
+export type SerializableDateRange = {
+  preset: DateFilterPreset
+  label: string
+  from: string | null
+  to: string | null
+}
 
 interface ReportsDateRangeFilterProps {
-  value: DateRange
+  value: SerializableDateRange
+}
+
+function toDateRange(value: SerializableDateRange): DateRange {
+  if (value.preset === 'custom') {
+    return getDateRange('custom', value.from, value.to)
+  }
+  return getDateRange(value.preset)
 }
 
 export function ReportsDateRangeFilter({ value }: ReportsDateRangeFilterProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const range = toDateRange(value)
 
-  const updateRange = (range: DateRange) => {
+  const updateRange = (next: DateRange) => {
     const params = new URLSearchParams(searchParams.toString())
-    params.set('range', range.preset)
-    if (range.preset === 'custom') {
-      if (range.from) params.set('from', range.from.toISOString().slice(0, 10))
+    params.set('range', next.preset)
+    if (next.preset === 'custom') {
+      if (next.from) params.set('from', next.from.toISOString().slice(0, 10))
       else params.delete('from')
-      if (range.to) params.set('to', range.to.toISOString().slice(0, 10))
+      if (next.to) params.set('to', next.to.toISOString().slice(0, 10))
       else params.delete('to')
     } else {
       params.delete('from')
@@ -29,5 +44,5 @@ export function ReportsDateRangeFilter({ value }: ReportsDateRangeFilterProps) {
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  return <DateRangeFilter value={value} onChange={updateRange} />
+  return <DateRangeFilter value={range} onChange={updateRange} />
 }

@@ -4,25 +4,24 @@ import { Download } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 
-type CsvValue = string | number | Date | null | undefined
+type CsvValue = string | number | null | undefined
 
-interface CsvExportButtonProps<T> {
+interface CsvExportButtonProps {
   filename: string
-  columns: { label: string; value: (row: T) => CsvValue }[]
-  rows: T[]
+  headers: string[]
+  rows: CsvValue[][]
 }
 
 function csvCell(value: CsvValue): string {
-  const text =
-    value instanceof Date ? value.toISOString().slice(0, 10) : value === null || value === undefined ? '' : String(value)
+  const text = value === null || value === undefined ? '' : String(value)
   return `"${text.replace(/"/g, '""')}"`
 }
 
-export function CsvExportButton<T>({ filename, columns, rows }: CsvExportButtonProps<T>) {
+export function CsvExportButton({ filename, headers, rows }: CsvExportButtonProps) {
   const downloadCsv = () => {
     const csv = [
-      columns.map((column) => csvCell(column.label)).join(','),
-      ...rows.map((row) => columns.map((column) => csvCell(column.value(row))).join(',')),
+      headers.map((header) => csvCell(header)).join(','),
+      ...rows.map((row) => row.map((cell) => csvCell(cell)).join(',')),
     ].join('\r\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
     const link = document.createElement('a')

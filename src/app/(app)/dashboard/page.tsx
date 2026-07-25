@@ -108,7 +108,14 @@ export default async function DashboardPage({
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <DashboardDateFilter range={data.range} />
+          <DashboardDateFilter
+            range={{
+              preset: data.range.preset,
+              label: data.range.label,
+              from: data.range.from ? data.range.from.toISOString().slice(0, 10) : null,
+              to: data.range.to ? data.range.to.toISOString().slice(0, 10) : null,
+            }}
+          />
           <div className="flex gap-2">
             <Button asChild className="bg-[#0f766e] hover:bg-[#0d6a63]">
               <Link href="/sales/new">
