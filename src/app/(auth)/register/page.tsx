@@ -68,8 +68,14 @@ export default function RegisterPage() {
       toast.success('Account created')
       router.push('/setup')
       router.refresh()
-    } catch {
-      toast.error('Unable to create account. Please try again.')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to create account. Please try again.'
+      toast.error(
+        message.includes('fetch') || message.includes('Supabase is not configured')
+          ? 'Server not connected. Add Supabase keys in Vercel Environment Variables, then redeploy.'
+          : message,
+      )
     } finally {
       setSubmitting(false)
     }
