@@ -3,10 +3,8 @@ import { Plus } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
 import { PageHeader } from '@/components/shared/page-header'
-import { ResponsiveDataTable } from '@/components/shared/responsive-data-table'
-import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { Button } from '@/components/ui/button'
-import { stockStatus } from '@/lib/labels'
+import { ProductsTable } from './products-table'
 
 export default async function ProductsPage({
   searchParams,
@@ -27,6 +25,16 @@ export default async function ProductsPage({
       ? products.filter((p) => p.currentStock <= p.lowStockLevel)
       : products
 
+  const rows = filtered.map((p) => ({
+    id: p.id,
+    name: p.name,
+    category: p.category,
+    currentStock: p.currentStock,
+    lowStockLevel: p.lowStockLevel,
+    sellingPrice: p.sellingPrice.toString(),
+    isActive: p.isActive,
+  }))
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -44,51 +52,9 @@ export default async function ProductsPage({
           </Button>
         }
       />
-      <ResponsiveDataTable
-        data={filtered}
-        getRowKey={(p) => p.id}
-        columns={[
-          {
-            key: 'name',
-            header: 'Product',
-            cell: (p) => (
-              <Link className="font-medium hover:underline" href={`/products/${p.id}`}>
-                {p.name}
-              </Link>
-            ),
-          },
-          { key: 'category', header: 'Category', cell: (p) => p.category },
-          {
-            key: 'stock',
-            header: 'Stock',
-            cell: (p) => `${p.currentStock} (${stockStatus(p.currentStock, p.lowStockLevel)})`,
-          },
-          {
-            key: 'price',
-            header: 'Price',
-            cell: (p) => <CurrencyDisplay value={p.sellingPrice} currency={profile.currency} />,
-          },
-          {
-            key: 'status',
-            header: 'Status',
-            cell: (p) => (
-              <span className={p.isActive ? 'text-emerald-600' : 'text-zinc-500'}>
-                {p.isActive ? 'Active' : 'Inactive'}
-              </span>
-            ),
-          },
-        ]}
-        renderMobileCard={(p) => (
-          <div className="space-y-2">
-            <Link className="font-medium" href={`/products/${p.id}`}>
-              {p.name}
-            </Link>
-            <div className="flex justify-between text-sm">
-              <span>{p.currentStock} in stock</span>
-              <CurrencyDisplay value={p.sellingPrice} currency={profile.currency} />
-            </div>
-          </div>
-        )}
+      <ProductsTable
+        products={rows}
+        currency={profile.currency}
         emptyTitle={stock === 'low' ? 'No low-stock products' : 'No products yet'}
         emptyDescription={
           stock === 'low'
