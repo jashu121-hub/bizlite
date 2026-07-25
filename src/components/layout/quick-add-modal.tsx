@@ -4,7 +4,7 @@ import * as React from 'react'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { getQuickAddOptionsAction } from '@/actions/quick-add'
+import { getQuickAddOptionsAction, listActiveProductsAction } from '@/actions/quick-add'
 import { createCustomerAction } from '@/actions/customers'
 import { createExpenseAction } from '@/actions/expenses'
 import { createProductAction } from '@/actions/products'
@@ -47,6 +47,7 @@ export function QuickAddModal() {
   } = useQuickAdd()
 
   const [loading, setLoading] = React.useState(false)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const [options, setOptions] = React.useState<{
     products: ProductOption[]
     customers: CustomerOption[]
@@ -54,20 +55,32 @@ export function QuickAddModal() {
     currency: string
   } | null>(null)
 
+  const refreshProducts = React.useCallback(async () => {
+    const result = await listActiveProductsAction()
+    if (!result.success) {
+      toast.error(result.error)
+      return
+    }
+    setOptions((prev) => (prev ? { ...prev, products: result.data } : prev))
+  }, [])
+
   React.useEffect(() => {
     if (!activeType) {
       setOptions(null)
       setLoading(false)
+      setLoadError(null)
       return
     }
 
     let cancelled = false
     setLoading(true)
+    setLoadError(null)
     void getQuickAddOptionsAction().then((result) => {
       if (cancelled) return
       if (!result.success) {
+        setLoadError(result.error)
+        setLoading(false)
         toast.error(result.error)
-        closeQuickAdd()
         return
       }
       setOptions(result.data)
@@ -77,7 +90,7 @@ export function QuickAddModal() {
     return () => {
       cancelled = true
     }
-  }, [activeType, closeQuickAdd])
+  }, [activeType])
 
   const meta = activeType ? TITLES[activeType] : null
   const open = activeType !== null
@@ -112,6 +125,12 @@ export function QuickAddModal() {
             requestCloseQuickAdd()
           }}
           onInteractOutside={(event) => {
+            // Allow Radix Select (portaled) interactions without closing the modal
+            const target = event.target as HTMLElement | null
+            if (target?.closest('[data-radix-select-content]')) {
+              event.preventDefault()
+              return
+            }
             event.preventDefault()
             requestCloseQuickAdd()
           }}
@@ -134,21 +153,52 @@ export function QuickAddModal() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-5">
-            {loading || !options || !activeType ? (
+            {loading || !activeType ? (
               <div className="space-y-3">
+                <p className="text-sm text-zinc-500">
+                  {activeType === 'sale' ? 'Loading products…' : 'Loading form…'}
+                </p>
                 <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-10 w-40 ml-auto" />
               </div>
-            ) : activeType === 'sale' ? (
+            ) : loadError ? (
+              <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <p>{loadError}</p>
+                <button
+                  type="button"
+                  className="font-medium underline"
+                  onClick={() => {
+                    setLoading(true)
+                    setLoadError(null)
+                    void getQuickAddOptionsAction().then((result) => {
+                      if (!result.success) {
+                        setLoadError(result.error)
+                        setLoading(false)
+                        return
+                      }
+                      setOptions(result.data)
+                      setLoading(false)
+                    })
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            ) : !options ? null : activeType === 'sale' ? (
               <SalesForm
-                key="quick-sale"
+                key={`quick-sale-${options.products.length}-${options.products[0]?.id ?? 'none'}`}
                 products={options.products}
                 customers={options.customers}
                 currency={options.currency || currency}
+                productsLoading={false}
+                productsError={null}
                 onSubmit={createSaleAction}
-                onSuccess={closeQuickAdd}
+                onSuccess={() => {
+                  closeQuickAdd()
+                  void refreshProducts()
+                }}
                 onCancel={requestCloseQuickAdd}
                 onDirtyChange={setIsDirty}
               />
@@ -166,7 +216,14 @@ export function QuickAddModal() {
               <ProductForm
                 key="quick-product"
                 currency={options.currency || currency}
-                onSubmit={createProductAction}
+                onSubmit={async (data) => {
+                  const result = await createProductAction(data)
+                  if (result.success) {
+                    // Keep product list fresh for the next New Sale open
+                    await refreshProducts()
+                  }
+                  return result
+                }}
                 onSuccess={closeQuickAdd}
                 onCancel={requestCloseQuickAdd}
                 onDirtyChange={setIsDirty}

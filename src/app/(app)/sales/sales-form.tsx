@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useTransition } from 'react'
+import { useEffect, useMemo, useTransition } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
@@ -23,6 +23,8 @@ type SalesFormProps = {
   customers: CustomerOption[]
   currency: string
   initial?: Partial<SaleInput>
+  productsLoading?: boolean
+  productsError?: string | null
   onSubmit: (data: SaleInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
@@ -30,11 +32,15 @@ type SalesFormProps = {
   className?: string
 }
 
+const emptyLine = { productId: '', quantity: 1, unitSellingPrice: '0' }
+
 export function SalesForm({
   products,
   customers,
   currency,
   initial,
+  productsLoading = false,
+  productsError = null,
   onSubmit,
   onSuccess,
   onCancel,
@@ -48,37 +54,76 @@ export function SalesForm({
     defaultValues: {
       date: todayInputValue(),
       customerId: '',
-      items: [{ productId: '', quantity: 1, unitSellingPrice: '0' }],
       discount: '0',
       amountPaid: '0',
       paymentMethod: 'CASH',
       notes: '',
       ...initial,
+      items: initial?.items?.length ? initial.items : [emptyLine],
     },
   })
   const itemsArray = useFieldArray({ control: form.control, name: 'items' })
   const items = form.watch('items') ?? []
-  const subtotal = items.reduce(
-    (sum: number, item: any) =>
-      sum + (Number(item.quantity) || 0) * (Number(item.unitSellingPrice) || 0),
-    0,
-  )
-  const total = Math.max(0, subtotal - (Number(form.watch('discount')) || 0))
+  const discountValue = Number(form.watch('discount')) || 0
   const amountPaid = Number(form.watch('amountPaid')) || 0
+
+  const lineTotals = useMemo(
+    () =>
+      items.map(
+        (item: { quantity?: number; unitSellingPrice?: string }) =>
+          (Number(item.quantity) || 0) * (Number(item.unitSellingPrice) || 0),
+      ),
+    [items],
+  )
+  const subtotal = lineTotals.reduce((sum: number, value: number) => sum + value, 0)
+  const total = Math.max(0, subtotal - Math.max(0, discountValue))
   const balance = Math.max(0, total - amountPaid)
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty)
   }, [form.formState.isDirty, onDirtyChange])
 
+  const selectedProductIds = items
+    .map((item: { productId?: string }) => item.productId)
+    .filter(Boolean) as string[]
+
   const updateProduct = (index: number, id: string) => {
     const product = products.find((item) => item.id === id)
-    form.setValue(`items.${index}.productId`, id, { shouldDirty: true })
-    if (product) {
-      form.setValue(`items.${index}.unitSellingPrice`, String(product.sellingPrice), {
-        shouldDirty: true,
-      })
+    if (!product) return
+
+    const existingIndex = items.findIndex(
+      (item: { productId?: string }, i: number) => i !== index && item.productId === id,
+    )
+    if (existingIndex >= 0) {
+      const mergedQty =
+        (Number(items[existingIndex].quantity) || 0) + (Number(items[index].quantity) || 1)
+      const maxQty = product.currentStock
+      form.setValue(
+        `items.${existingIndex}.quantity`,
+        Math.min(Math.max(1, mergedQty), Math.max(1, maxQty)),
+        { shouldDirty: true, shouldValidate: true },
+      )
+      if (itemsArray.fields.length > 1) {
+        itemsArray.remove(index)
+      } else {
+        form.setValue(`items.${index}.productId`, '', { shouldDirty: true })
+        form.setValue(`items.${index}.quantity`, 1, { shouldDirty: true })
+        form.setValue(`items.${index}.unitSellingPrice`, '0', { shouldDirty: true })
+      }
+      toast.message(`Merged into existing ${product.name} line`)
+      return
     }
+
+    form.setValue(`items.${index}.productId`, id, { shouldDirty: true, shouldValidate: true })
+    form.setValue(`items.${index}.unitSellingPrice`, String(product.sellingPrice), {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    const currentQty = Number(form.getValues(`items.${index}.quantity`)) || 1
+    form.setValue(`items.${index}.quantity`, Math.max(1, currentQty), {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
   }
 
   const handleCancel = () => {
@@ -91,14 +136,47 @@ export function SalesForm({
       className={cn('space-y-5', className)}
       onSubmit={form.handleSubmit((data: SaleInput) =>
         startTransition(async () => {
-          const overStock = data.items.some(
-            (item) =>
-              item.quantity > (products.find((product) => product.id === item.productId)?.currentStock ?? 0),
-          )
-          if (overStock) {
-            toast.error('A line exceeds available stock')
+          if (!data.items.some((item) => item.productId)) {
+            toast.error('Select at least one product')
             return
           }
+          if (discountValue < 0) {
+            toast.error('Discount cannot be negative')
+            return
+          }
+          if (discountValue > subtotal) {
+            toast.error('Discount cannot be greater than subtotal')
+            return
+          }
+          if (amountPaid < 0) {
+            toast.error('Amount paid cannot be negative')
+            return
+          }
+          if (amountPaid > total) {
+            toast.error('Amount paid cannot be greater than total')
+            return
+          }
+
+          for (const item of data.items) {
+            const product = products.find((row) => row.id === item.productId)
+            if (!product) {
+              toast.error('A selected product is no longer available')
+              return
+            }
+            if (item.quantity <= 0) {
+              toast.error('Quantity must be greater than zero')
+              return
+            }
+            if (Number(item.unitSellingPrice) < 0) {
+              toast.error('Unit price cannot be negative')
+              return
+            }
+            if (item.quantity > product.currentStock) {
+              toast.error(`${product.name} only has ${product.currentStock} in stock`)
+              return
+            }
+          }
+
           const result = await onSubmit(data)
           if (!result.success) {
             toast.error(result.error)
@@ -134,36 +212,72 @@ export function SalesForm({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() =>
-              itemsArray.append({ productId: '', quantity: 1, unitSellingPrice: '0' })
-            }
+            disabled={productsLoading || !!productsError}
+            onClick={() => itemsArray.append({ ...emptyLine })}
           >
             Add line
           </Button>
         </div>
+
+        {productsError ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {productsError}
+          </p>
+        ) : null}
+
         {itemsArray.fields.map((line, index) => {
-          const product = products.find((item) => item.id === form.watch(`items.${index}.productId`))
+          const productId = form.watch(`items.${index}.productId`) as string
+          const product = products.find((item) => item.id === productId)
+          const qty = Number(form.watch(`items.${index}.quantity`)) || 0
+          const unitPrice = Number(form.watch(`items.${index}.unitSellingPrice`)) || 0
+          const lineTotal = qty * unitPrice
+          const excludeIds = selectedProductIds.filter((id) => id !== productId)
+
           return (
             <div
               key={line.id}
-              className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[1fr_90px_130px_auto]"
+              className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[1.4fr_110px_130px_auto]"
             >
               <ProductSelector
                 products={products}
-                value={form.watch(`items.${index}.productId`)}
+                value={productId}
                 onChange={(id) => updateProduct(index, id)}
+                currency={currency}
                 label={`Product ${index + 1}`}
                 id={`product-${index}`}
+                loading={productsLoading}
+                error={productsError}
+                excludeIds={excludeIds}
               />
               <div className="space-y-2">
                 <label htmlFor={`qty-${index}`}>Qty</label>
                 <Input
                   id={`qty-${index}`}
                   type="number"
-                  min="1"
-                  max={product?.currentStock}
-                  {...form.register(`items.${index}.quantity`, { valueAsNumber: true })}
+                  min={1}
+                  max={product?.currentStock ?? undefined}
+                  step={1}
+                  {...form.register(`items.${index}.quantity`, {
+                    valueAsNumber: true,
+                    onChange: (event) => {
+                      const next = Number(event.target.value)
+                      if (!product) return
+                      if (next > product.currentStock) {
+                        form.setValue(`items.${index}.quantity`, product.currentStock, {
+                          shouldDirty: true,
+                        })
+                        toast.error(`Only ${product.currentStock} in stock`)
+                      }
+                    },
+                  })}
                 />
+                <p className="text-xs text-zinc-500">
+                  {product
+                    ? `${product.currentStock} available`
+                    : productsLoading
+                      ? 'Loading stock…'
+                      : 'Select a product'}
+                </p>
               </div>
               <div className="space-y-2">
                 <label>Unit price</label>
@@ -171,22 +285,25 @@ export function SalesForm({
                   currency={currency}
                   value={form.watch(`items.${index}.unitSellingPrice`)}
                   onChange={(value) =>
-                    form.setValue(`items.${index}.unitSellingPrice`, value, { shouldDirty: true })
+                    form.setValue(`items.${index}.unitSellingPrice`, value, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
                   }
                 />
+                <p className="text-xs text-zinc-500">
+                  Line: {formatCurrency(lineTotal, currency)}
+                </p>
               </div>
               <Button
                 type="button"
                 variant="ghost"
-                className="self-end"
+                className="self-start sm:self-end"
                 disabled={itemsArray.fields.length === 1}
                 onClick={() => itemsArray.remove(index)}
               >
                 Remove
               </Button>
-              {product ? (
-                <p className="text-xs text-zinc-500 sm:col-span-4">{product.currentStock} in stock</p>
-              ) : null}
             </div>
           )
         })}
@@ -227,7 +344,7 @@ export function SalesForm({
 
       <div className="space-y-1 rounded-lg bg-zinc-100 p-4 text-right dark:bg-zinc-900">
         <p>Subtotal: {formatCurrency(subtotal, currency)}</p>
-        <p>Discount: {formatCurrency(Number(form.watch('discount')) || 0, currency)}</p>
+        <p>Discount: {formatCurrency(Math.max(0, discountValue), currency)}</p>
         <p>Paid: {formatCurrency(amountPaid, currency)}</p>
         <p>Balance: {formatCurrency(balance, currency)}</p>
         <p className="text-lg font-bold">Total: {formatCurrency(total, currency)}</p>
@@ -238,11 +355,13 @@ export function SalesForm({
         <Textarea id="sale-notes" {...form.register('notes')} />
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-zinc-100 pt-4">
+      <div className="sticky bottom-0 z-10 flex justify-end gap-2 border-t border-zinc-100 bg-white pt-4">
         <Button type="button" variant="outline" onClick={handleCancel} disabled={pending}>
           Cancel
         </Button>
-        <Button disabled={pending}>{pending ? 'Saving…' : 'Save sale'}</Button>
+        <Button disabled={pending || productsLoading || !!productsError}>
+          {pending ? 'Saving…' : 'Save sale'}
+        </Button>
       </div>
     </form>
   )

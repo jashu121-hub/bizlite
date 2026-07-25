@@ -32,6 +32,7 @@ function revalidateProductPaths(productId?: string) {
   revalidatePath('/products')
   revalidatePath('/dashboard')
   revalidatePath('/reports')
+  revalidatePath('/sales')
   revalidatePath('/sales/new')
   if (productId) revalidatePath(`/products/${productId}`)
 }

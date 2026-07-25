@@ -11,7 +11,13 @@ export async function getQuickAddOptionsAction() {
     const [products, customers, categories] = await Promise.all([
       prisma.product.findMany({
         where: { userId: user.id, isActive: true },
-        select: { id: true, name: true, currentStock: true, sellingPrice: true },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          currentStock: true,
+          sellingPrice: true,
+        },
         orderBy: { name: 'asc' },
       }),
       prisma.customer.findMany({
@@ -25,7 +31,10 @@ export async function getQuickAddOptionsAction() {
     return ok({
       currency: profile.currency,
       products: products.map((product) => ({
-        ...product,
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        currentStock: product.currentStock,
         sellingPrice: product.sellingPrice.toString(),
       })),
       customers,
@@ -34,5 +43,35 @@ export async function getQuickAddOptionsAction() {
   } catch (error) {
     console.error('getQuickAddOptionsAction', error)
     return fail(error instanceof Error ? error.message : 'Unable to load form data')
+  }
+}
+
+/** Fresh active products for sale forms (Quick Add / New Sale). */
+export async function listActiveProductsAction() {
+  try {
+    const { user } = await requireProfile()
+    const products = await prisma.product.findMany({
+      where: { userId: user.id, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        currentStock: true,
+        sellingPrice: true,
+      },
+      orderBy: { name: 'asc' },
+    })
+    return ok(
+      products.map((product) => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        currentStock: product.currentStock,
+        sellingPrice: product.sellingPrice.toString(),
+      })),
+    )
+  } catch (error) {
+    console.error('listActiveProductsAction', error)
+    return fail(error instanceof Error ? error.message : 'Unable to load products')
   }
 }

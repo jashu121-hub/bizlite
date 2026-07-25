@@ -49,11 +49,11 @@ export function CustomerSelector({
   return (
     <div className={cn('space-y-2', className)}>
       <Label htmlFor={id}>{label}</Label>
-      <Select value={selectValue} onValueChange={handleChange} disabled={disabled}>
+      <Select value={selectValue || undefined} onValueChange={handleChange} disabled={disabled}>
         <SelectTrigger id={id} aria-label={label}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="z-[200]">
           {allowWalkIn ? (
             <SelectItem value="__walk_in__">{walkInLabel}</SelectItem>
           ) : null}
