@@ -7,6 +7,7 @@ import {
 import { StockStatusBadge } from '@/app/(app)/products/stock-status-badge'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { ResponsiveDataTable } from '@/components/shared/responsive-data-table'
+import type { ProductCostBreakdown } from '@/lib/product-cost'
 import { cn } from '@/lib/utils'
 
 export type ProductRow = {
@@ -20,6 +21,7 @@ export type ProductRow = {
   costPrice: string
   sellingPrice: string
   notes: string | null
+  costBreakdown: ProductCostBreakdown | null
   isActive: boolean
   updatedAt: string
 }

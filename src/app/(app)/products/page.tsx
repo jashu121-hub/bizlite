@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
+import { parseCostBreakdown } from '@/lib/product-cost'
 import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { ProductsTable } from './products-table'
@@ -36,6 +37,7 @@ export default async function ProductsPage({
     costPrice: p.costPrice.toString(),
     sellingPrice: p.sellingPrice.toString(),
     notes: p.notes,
+    costBreakdown: parseCostBreakdown(p.costBreakdown),
     isActive: p.isActive,
     updatedAt: p.updatedAt.toISOString(),
   }))

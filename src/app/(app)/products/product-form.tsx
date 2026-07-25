@@ -6,12 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
+import { ProductCostCalculator } from '@/components/products/product-cost-calculator'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { PRODUCT_CATEGORIES } from '@/lib/constants'
+import { normalizeCostBreakdown, type ProductCostBreakdown } from '@/lib/product-cost'
 import { productSchema, type ProductInput } from '@/lib/validations/product'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +54,9 @@ export function ProductForm({
       notes: '',
       isActive: true,
       ...initial,
+      costBreakdown: initial?.costBreakdown
+        ? normalizeCostBreakdown(initial.costBreakdown as ProductCostBreakdown)
+        : null,
     },
   })
 
@@ -61,7 +66,13 @@ export function ProductForm({
 
   const submit = (data: ProductInput) =>
     startTransition(async () => {
-      const result = await onSubmit(data)
+      const payload: ProductInput = {
+        ...data,
+        costBreakdown: data.costBreakdown
+          ? normalizeCostBreakdown(data.costBreakdown as ProductCostBreakdown)
+          : null,
+      }
+      const result = await onSubmit(payload)
       if (!result.success) {
         toast.error(result.error)
         return
@@ -89,6 +100,9 @@ export function ProductForm({
       </p>
     </div>
   )
+
+  const costBreakdown = form.watch('costBreakdown') as ProductCostBreakdown | null
+  const sellingPrice = form.watch('sellingPrice') as string
 
   return (
     <form onSubmit={form.handleSubmit(submit)} className={cn('space-y-5', className)}>
@@ -127,18 +141,37 @@ export function ProductForm({
               form.setValue('costPrice', value, { shouldValidate: true, shouldDirty: true })
             }
           />
+          <p className="text-xs text-zinc-500">Inventory cost per unit</p>
         </div>
         <div className="space-y-2">
           <Label>Selling price</Label>
           <CurrencyInput
             currency={currency}
-            value={form.watch('sellingPrice')}
+            value={sellingPrice}
             onChange={(value) =>
               form.setValue('sellingPrice', value, { shouldValidate: true, shouldDirty: true })
             }
           />
         </div>
       </div>
+
+      <ProductCostCalculator
+        currency={currency}
+        value={costBreakdown}
+        sellingPrice={sellingPrice || '0'}
+        defaultOpen={Boolean(initial?.costBreakdown)}
+        onChange={(breakdown) =>
+          form.setValue('costBreakdown', breakdown, { shouldDirty: true, shouldValidate: true })
+        }
+        onInventoryCostChange={(inventoryCostPerUnit) => {
+          if (form.getValues('costPrice') === inventoryCostPerUnit) return
+          form.setValue('costPrice', inventoryCostPerUnit, {
+            shouldValidate: true,
+            shouldDirty: true,
+          })
+        }}
+      />
+
       <div className={cn('grid gap-5', hideOpeningStock ? '' : 'sm:grid-cols-2')}>
         {hideOpeningStock ? null : field('Opening stock', 'openingStock', 'number')}
         {field('Low stock alert level', 'lowStockLevel', 'number')}

@@ -41,6 +41,7 @@ export function EditProductModal({
           lowStockLevel: product.lowStockLevel,
           notes: product.notes ?? '',
           isActive: product.isActive,
+          costBreakdown: product.costBreakdown,
         }}
         onSubmit={(data) => updateProductAction(product.id, data)}
         onSuccess={() => onOpenChange(false)}

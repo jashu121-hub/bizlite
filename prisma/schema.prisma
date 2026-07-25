@@ -75,6 +75,7 @@ model Product {
   currentStock   Int      @default(0)
   lowStockLevel  Int      @default(5)
   notes          String?
+  costBreakdown  Json?
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

@@ -4,14 +4,29 @@ import { revalidatePath } from 'next/cache'
 import { requireProfile } from '@/lib/auth'
 import { fail, ok } from '@/lib/action-result'
 import { prisma } from '@/lib/prisma'
-import { prismaDecimal } from '@/lib/money'
+import { money, prismaDecimal } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
+import {
+  normalizeCostBreakdown,
+  weightedAverageCost,
+  type ProductCostBreakdown,
+} from '@/lib/product-cost'
 import {
   addStockSchema,
   adjustStockDetailedSchema,
   productSchema,
   stockAdjustmentSchema,
 } from '@/lib/validations/product'
+import { Prisma } from '@prisma/client'
+
+function toCostBreakdownJson(
+  raw: unknown,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null) return Prisma.JsonNull
+  const normalized = normalizeCostBreakdown(raw as Partial<ProductCostBreakdown>)
+  return normalized as unknown as Prisma.InputJsonValue
+}
 
 function revalidateProductPaths(productId?: string) {
   revalidatePath('/products')
@@ -42,6 +57,7 @@ export async function createProductAction(raw: unknown) {
           lowStockLevel: data.lowStockLevel,
           notes: data.notes || null,
           isActive: data.isActive,
+          costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
         },
       })
       if (opening > 0) {
@@ -91,6 +107,7 @@ export async function updateProductAction(id: string, raw: unknown) {
         lowStockLevel: data.lowStockLevel,
         notes: data.notes || null,
         isActive: data.isActive,
+        costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
       },
     })
     revalidateProductPaths(id)
@@ -202,12 +219,31 @@ export async function addStockAction(raw: unknown) {
         data.notes || null,
       ].filter(Boolean)
 
+      const batchBreakdown = data.costBreakdown
+        ? normalizeCostBreakdown(data.costBreakdown)
+        : null
+      const hasBatchProduction =
+        Boolean(batchBreakdown) && money(batchBreakdown!.totalProductionCost).gt(0)
+      const hasBatchBreakdown =
+        Boolean(batchBreakdown) &&
+        (hasBatchProduction || money(batchBreakdown!.totalSellingCost).gt(0))
+      const newUnitCost = hasBatchProduction
+        ? batchBreakdown!.inventoryCostPerUnit
+        : data.purchaseCost
+          ? String(data.purchaseCost)
+          : null
+
+      const nextCostPrice = newUnitCost
+        ? weightedAverageCost(before, product.costPrice, data.quantity, newUnitCost)
+        : null
+
       await tx.product.update({
         where: { id: product.id },
         data: {
           currentStock: after,
-          ...(data.purchaseCost
-            ? { costPrice: prismaDecimal(data.purchaseCost) }
+          ...(nextCostPrice ? { costPrice: prismaDecimal(nextCostPrice) } : {}),
+          ...(hasBatchBreakdown
+            ? { costBreakdown: toCostBreakdownJson(batchBreakdown) }
             : {}),
         },
       })
