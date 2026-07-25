@@ -23,16 +23,16 @@ async function sumSales(
   from: Date,
   to?: Date,
 ): Promise<{ total: number; cost: number }> {
-  const rows = await prisma.sale.findMany({
+  const agg = await prisma.sale.aggregate({
     where: {
       userId,
       date: to ? { gte: from, lte: to } : { gte: from },
     },
-    select: { totalAmount: true, totalCost: true },
+    _sum: { totalAmount: true, totalCost: true },
   })
   return {
-    total: moneyNumber(addMoney(...rows.map((s) => s.totalAmount))),
-    cost: moneyNumber(addMoney(...rows.map((s) => s.totalCost))),
+    total: moneyNumber(agg._sum.totalAmount || 0),
+    cost: moneyNumber(agg._sum.totalCost || 0),
   }
 }
 
@@ -63,7 +63,7 @@ export async function getDashboardData(
   const prevMonthStart = startOfMonth(subMonths(new Date(), 1))
   const prevMonthEnd = endOfMonth(subMonths(new Date(), 1))
 
-  // Keep concurrency low for serverless DB pools
+  // Fully sequential to avoid exhausting serverless DB pools
   const todaySales = await sumSales(userId, todayStart)
   const yesterdaySales = await sumSales(userId, yesterdayStart, yesterdayEnd)
   const monthSales = await sumSales(userId, monthStart, monthEnd)
@@ -71,58 +71,53 @@ export async function getDashboardData(
   const prevMonthSales = await sumSales(userId, prevMonthStart, prevMonthEnd)
   const prevMonthExpensesTotal = await sumExpenses(userId, prevMonthStart, prevMonthEnd)
 
-  const [periodSales, periodExpenses, products] = await Promise.all([
-    prisma.sale.findMany({
-      where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
-      select: {
-        id: true,
-        date: true,
-        totalAmount: true,
-        totalCost: true,
-        balancePending: true,
-        invoiceNumber: true,
-        paymentStatus: true,
-        customer: { select: { name: true } },
-        items: { select: { productName: true, lineTotal: true } },
-      },
-      orderBy: { date: 'desc' },
-    }),
-    prisma.expense.findMany({
-      where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
-      select: { id: true, date: true, amount: true, category: true, description: true },
-      orderBy: { date: 'desc' },
-    }),
-    prisma.product.findMany({
-      where: { userId, isActive: true },
-      select: {
-        id: true,
-        name: true,
-        currentStock: true,
-        lowStockLevel: true,
-        costPrice: true,
-      },
-    }),
-  ])
-
-  const [recentSales, recentExpenses, pendingSales] = await Promise.all([
-    prisma.sale.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      include: { customer: { select: { name: true } } },
-    }),
-    prisma.expense.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    }),
-    prisma.sale.findMany({
-      where: { userId, balancePending: { gt: 0 }, customerId: { not: null } },
-      include: { customer: true },
-      orderBy: { date: 'asc' },
-      take: 8,
-    }),
-  ])
+  const periodSales = await prisma.sale.findMany({
+    where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
+    select: {
+      id: true,
+      date: true,
+      totalAmount: true,
+      totalCost: true,
+      balancePending: true,
+      invoiceNumber: true,
+      paymentStatus: true,
+      customer: { select: { name: true } },
+      items: { select: { productName: true, lineTotal: true } },
+    },
+    orderBy: { date: 'desc' },
+  })
+  const periodExpenses = await prisma.expense.findMany({
+    where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
+    select: { id: true, date: true, amount: true, category: true, description: true },
+    orderBy: { date: 'desc' },
+  })
+  const products = await prisma.product.findMany({
+    where: { userId, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      currentStock: true,
+      lowStockLevel: true,
+      costPrice: true,
+    },
+  })
+  const recentSales = await prisma.sale.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    include: { customer: { select: { name: true } } },
+  })
+  const recentExpenses = await prisma.expense.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+  })
+  const pendingSales = await prisma.sale.findMany({
+    where: { userId, balancePending: { gt: 0 }, customerId: { not: null } },
+    include: { customer: true },
+    orderBy: { date: 'asc' },
+    take: 8,
+  })
 
   const todaySalesTotal = todaySales.total
   const yesterdaySalesTotal = yesterdaySales.total

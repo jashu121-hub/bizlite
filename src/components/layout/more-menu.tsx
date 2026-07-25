@@ -49,6 +49,7 @@ export function MoreMenu({ open, onOpenChange }: MoreMenuProps) {
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 onClick={handleNavigate}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
