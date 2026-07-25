@@ -14,7 +14,7 @@ export function paymentMethodLabel(method: PaymentMethod): string {
 export function paymentStatusLabel(status: PaymentStatus): string {
   const map: Record<PaymentStatus, string> = {
     PAID: 'Paid',
-    PARTIALLY_PAID: 'Partially Paid',
+    PARTIALLY_PAID: 'Partial',
     PENDING: 'Pending',
   }
   return map[status]

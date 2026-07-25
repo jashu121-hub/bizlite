@@ -2,10 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import * as React from 'react'
 import {
-  ChevronLeft,
-  ChevronRight,
   LayoutDashboard,
   Receipt,
   Wallet,
@@ -14,7 +11,10 @@ import {
   BarChart3,
   Settings,
   LogOut,
+  Crown,
+  HelpCircle,
 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { useLogout } from '@/components/layout/use-logout'
 import { Button } from '@/components/ui/button'
@@ -31,50 +31,31 @@ const NAV_ITEMS = [
   { href: '/settings', label: 'Settings', icon: Settings },
 ] as const
 
-interface DesktopSidebarProps {
-  className?: string
-}
-
-export function DesktopSidebar({ className }: DesktopSidebarProps) {
+export function DesktopSidebar({
+  ownerName,
+  email,
+}: {
+  ownerName?: string | null
+  email?: string | null
+}) {
   const pathname = usePathname()
   const { logout, loading } = useLogout()
-  const [collapsed, setCollapsed] = React.useState(false)
+  const displayName = ownerName?.trim() || 'Demo User'
+  const displayEmail = email?.trim() || 'demo@bizlite.app'
 
   return (
-    <aside
-      className={cn(
-        'hidden h-full flex-col border-r border-zinc-200 bg-white transition-[width] duration-200 dark:border-zinc-800 dark:bg-zinc-950 md:flex',
-        collapsed ? 'w-[4.5rem]' : 'w-64',
-        className,
-      )}
-    >
-      <div className="flex h-14 items-center justify-between border-b border-zinc-200 px-3 dark:border-zinc-800">
-        {!collapsed ? (
-          <Link href="/dashboard" className="truncate px-2 text-lg font-semibold text-teal-700">
-            {APP_NAME}
-          </Link>
-        ) : (
-          <Link
-            href="/dashboard"
-            className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-teal-700 text-sm font-bold text-white"
-            aria-label={APP_NAME}
-          >
-            B
-          </Link>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="shrink-0"
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </Button>
+    <aside className="hidden h-dvh w-[260px] shrink-0 flex-col bg-[#0b3d38] text-white md:flex">
+      <div className="flex items-center gap-3 px-5 py-6">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">
+          B
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-bold tracking-tight">{APP_NAME}</p>
+          <p className="truncate text-xs text-emerald-100/70">Business made simple.</p>
+        </div>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto p-2" aria-label="Main navigation">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label="Main navigation">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`)
           return (
@@ -83,36 +64,63 @@ export function DesktopSidebar({ className }: DesktopSidebarProps) {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
                 active
-                  ? 'bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
-                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-50',
-                collapsed && 'justify-center px-2',
+                  ? 'bg-white text-[#0b3d38] shadow-sm'
+                  : 'text-emerald-50/80 hover:bg-white/10 hover:text-white',
               )}
-              title={collapsed ? label : undefined}
             >
               <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-              {!collapsed ? <span>{label}</span> : null}
+              <span>{label}</span>
             </Link>
           )
         })}
       </nav>
 
-      <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void logout()}
-          disabled={loading}
-          className={cn(
-            'w-full justify-start gap-3 text-zinc-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400',
-            collapsed && 'justify-center px-2',
-          )}
-          aria-label="Log out"
-        >
-          <LogOut className="h-5 w-5 shrink-0" aria-hidden="true" />
-          {!collapsed ? <span>{loading ? 'Logging out…' : 'Logout'}</span> : null}
-        </Button>
+      <div className="space-y-3 px-3 pb-4">
+        <div className="rounded-2xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 p-4 ring-1 ring-amber-300/30">
+          <div className="mb-2 flex items-center gap-2 text-amber-200">
+            <Crown className="h-4 w-4" />
+            <span className="text-sm font-semibold">Upgrade to Pro</span>
+          </div>
+          <p className="mb-3 text-xs leading-relaxed text-emerald-50/70">
+            Unlock advanced reports, multi-user access, and priority support.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            className="w-full bg-amber-400 text-amber-950 hover:bg-amber-300"
+            onClick={() => toast.message('Pro plan coming soon')}
+          >
+            Upgrade Now
+          </Button>
+        </div>
+
+        <div className="rounded-2xl bg-white/5 p-3 ring-1 ring-white/10">
+          <div className="mb-3 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-400/20 text-sm font-bold text-emerald-100">
+              {displayName.slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{displayName}</p>
+              <p className="truncate text-xs text-emerald-100/60">{displayEmail}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-emerald-50 hover:bg-white/15 disabled:opacity-60"
+          >
+            <LogOut className="h-4 w-4" />
+            {loading ? 'Logging out…' : 'Logout'}
+          </button>
+        </div>
+
+        <p className="flex items-center justify-center gap-1 px-2 text-[11px] text-emerald-100/40">
+          <HelpCircle className="h-3 w-3" />
+          Need help? Check Settings
+        </p>
       </div>
     </aside>
   )

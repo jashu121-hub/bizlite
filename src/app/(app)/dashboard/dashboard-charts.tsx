@@ -5,7 +5,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -15,42 +14,135 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { ChartCard } from '@/components/shared/chart-card'
 import { formatCurrency } from '@/lib/money'
 
 type Row = { name: string; value: number }
+
+const COLORS = ['#0f766e', '#f59e0b', '#6366f1', '#ef4444', '#06b6d4', '#84cc16', '#a855f7']
 
 export function DashboardCharts({
   charts,
   currency,
 }: {
-  charts: { salesVsExpenses: Row[]; monthlyNet: Row[]; salesByProduct: Row[]; expensesByCategory: Row[] }
+  charts: {
+    salesVsExpenses: Row[]
+    dailyNet: { name: string; value: number; sales?: number; expenses?: number }[]
+    expensesByCategory: Row[]
+  }
   currency: string
 }) {
   const money = (value: number) => formatCurrency(value, currency)
-  const tooltip = { formatter: ((value: unknown) => money(Number(Array.isArray(value) ? value[0] : value ?? 0))) as never }
+  const expenseTotal = charts.expensesByCategory.reduce((sum, row) => sum + row.value, 0)
+
   return (
-    <section className="grid gap-6 lg:grid-cols-2">
-      <ChartCard title="Sales vs expenses" empty={!charts.salesVsExpenses.some((row) => row.value)}>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={charts.salesVsExpenses}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(v) => `${currency} ${v}`} /><Tooltip {...tooltip} /><Bar dataKey="value" fill="#0f766e" radius={[4, 4, 0, 0]} /></BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-      <ChartCard title="Monthly net profit" empty={!charts.monthlyNet.length}>
-        <ResponsiveContainer width="100%" height={260}>
-          <LineChart data={charts.monthlyNet}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(v) => `${currency} ${v}`} /><Tooltip {...tooltip} /><Line type="monotone" dataKey="value" stroke="#0f766e" strokeWidth={2} /></LineChart>
-        </ResponsiveContainer>
-      </ChartCard>
-      <ChartCard title="Sales by product" empty={!charts.salesByProduct.length}>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={charts.salesByProduct} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" tickFormatter={(v) => `${currency} ${v}`} /><YAxis dataKey="name" type="category" width={100} /><Tooltip {...tooltip} /><Bar dataKey="value" fill="#2563eb" radius={[0, 4, 4, 0]} /></BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-      <ChartCard title="Expenses by category" empty={!charts.expensesByCategory.length}>
-        <ResponsiveContainer width="100%" height={260}>
-          <PieChart><Pie data={charts.expensesByCategory} dataKey="value" nameKey="name" outerRadius={90} label>{charts.expensesByCategory.map((row, index) => <Cell key={row.name} fill={['#0f766e','#2563eb','#9333ea','#ea580c','#dc2626','#ca8a04'][index % 6]} />)}</Pie><Legend /><Tooltip {...tooltip} /></PieChart>
-        </ResponsiveContainer>
-      </ChartCard>
+    <section className="grid gap-4 xl:grid-cols-3">
+      <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
+        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Sales vs Expenses</h3>
+        <p className="mb-4 text-xs text-zinc-500">Period comparison</p>
+        {charts.salesVsExpenses.every((r) => !r.value) ? (
+          <EmptyChart />
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={charts.salesVsExpenses} barSize={42}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: '#9ca3af', fontSize: 11 }} width={50} />
+              <Tooltip formatter={(value) => money(Number(value))} />
+              <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                {charts.salesVsExpenses.map((row) => (
+                  <Cell key={row.name} fill={row.name === 'Sales' ? '#0f766e' : '#ef4444'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
+        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Net Profit Overview</h3>
+        <p className="mb-4 text-xs text-zinc-500">Daily net profit trend</p>
+        {!charts.dailyNet.length ? (
+          <EmptyChart />
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={charts.dailyNet}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#6b7280', fontSize: 11 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: '#9ca3af', fontSize: 11 }} width={50} />
+              <Tooltip formatter={(value) => money(Number(value))} />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#7c3aed"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
+        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Expenses by Category</h3>
+        <p className="mb-4 text-xs text-zinc-500">Where money is going</p>
+        {!charts.expensesByCategory.length ? (
+          <EmptyChart />
+        ) : (
+          <div className="relative">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie
+                  data={charts.expensesByCategory}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={58}
+                  outerRadius={86}
+                  paddingAngle={2}
+                >
+                  {charts.expensesByCategory.map((row, index) => (
+                    <Cell key={row.name} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value) => money(Number(value))} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-[11px] text-zinc-500">Total</p>
+                <p className="text-sm font-bold text-zinc-800">{money(expenseTotal)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        {charts.expensesByCategory.length > 0 ? (
+          <ul className="mt-2 space-y-1.5">
+            {charts.expensesByCategory.slice(0, 5).map((row, index) => {
+              const pct = expenseTotal ? (row.value / expenseTotal) * 100 : 0
+              return (
+                <li key={row.name} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="flex items-center gap-2 text-zinc-600">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: COLORS[index % COLORS.length] }}
+                    />
+                    {row.name}
+                  </span>
+                  <span className="font-medium text-zinc-800">{pct.toFixed(1)}%</span>
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
+      </div>
     </section>
+  )
+}
+
+function EmptyChart() {
+  return (
+    <div className="flex h-[240px] items-center justify-center text-sm text-zinc-400">
+      No data for this period
+    </div>
   )
 }

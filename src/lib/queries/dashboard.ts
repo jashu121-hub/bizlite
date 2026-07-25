@@ -1,7 +1,22 @@
-import { startOfDay, startOfMonth, endOfMonth } from 'date-fns'
+import {
+  eachDayOfInterval,
+  endOfDay,
+  endOfMonth,
+  format,
+  startOfDay,
+  startOfMonth,
+  subDays,
+  subMonths,
+} from 'date-fns'
 import { prisma } from '@/lib/prisma'
 import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
+import { expenseCategoryLabel } from '@/lib/labels'
+
+function pctChange(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : 100
+  return ((current - previous) / Math.abs(previous)) * 100
+}
 
 export async function getDashboardData(
   userId: string,
@@ -12,13 +27,20 @@ export async function getDashboardData(
   const range = getDateRange(preset, customFrom, customTo)
   const dateFilter = prismaDateFilter(range)
   const todayStart = startOfDay(new Date())
+  const yesterdayStart = startOfDay(subDays(new Date(), 1))
+  const yesterdayEnd = endOfDay(subDays(new Date(), 1))
   const monthStart = startOfMonth(new Date())
   const monthEnd = endOfMonth(new Date())
+  const prevMonthStart = startOfMonth(subMonths(new Date(), 1))
+  const prevMonthEnd = endOfMonth(subMonths(new Date(), 1))
 
   const [
     todaySales,
+    yesterdaySales,
     monthSales,
     monthExpenses,
+    prevMonthSales,
+    prevMonthExpenses,
     periodSales,
     periodExpenses,
     products,
@@ -31,11 +53,23 @@ export async function getDashboardData(
       select: { totalAmount: true, totalCost: true },
     }),
     prisma.sale.findMany({
+      where: { userId, date: { gte: yesterdayStart, lte: yesterdayEnd } },
+      select: { totalAmount: true },
+    }),
+    prisma.sale.findMany({
       where: { userId, date: { gte: monthStart, lte: monthEnd } },
       select: { totalAmount: true, totalCost: true },
     }),
     prisma.expense.findMany({
       where: { userId, date: { gte: monthStart, lte: monthEnd } },
+      select: { amount: true },
+    }),
+    prisma.sale.findMany({
+      where: { userId, date: { gte: prevMonthStart, lte: prevMonthEnd } },
+      select: { totalAmount: true, totalCost: true },
+    }),
+    prisma.expense.findMany({
+      where: { userId, date: { gte: prevMonthStart, lte: prevMonthEnd } },
       select: { amount: true },
     }),
     prisma.sale.findMany({
@@ -90,57 +124,83 @@ export async function getDashboardData(
     }),
   ])
 
-  const todaySalesTotal = addMoney(...todaySales.map((s) => s.totalAmount))
-  const monthSalesTotal = addMoney(...monthSales.map((s) => s.totalAmount))
+  const todaySalesTotal = moneyNumber(addMoney(...todaySales.map((s) => s.totalAmount)))
+  const yesterdaySalesTotal = moneyNumber(addMoney(...yesterdaySales.map((s) => s.totalAmount)))
+  const monthSalesTotal = moneyNumber(addMoney(...monthSales.map((s) => s.totalAmount)))
   const monthCogs = addMoney(...monthSales.map((s) => s.totalCost))
-  const monthExpensesTotal = addMoney(...monthExpenses.map((e) => e.amount))
-  const monthGross = subMoney(monthSalesTotal, monthCogs)
-  const monthNet = subMoney(monthGross, monthExpensesTotal)
+  const monthExpensesTotal = moneyNumber(addMoney(...monthExpenses.map((e) => e.amount)))
+  const monthGross = moneyNumber(subMoney(monthSalesTotal, monthCogs))
+  const monthNet = moneyNumber(subMoney(monthGross, monthExpensesTotal))
 
-  const periodRevenue = addMoney(...periodSales.map((s) => s.totalAmount))
+  const prevMonthSalesTotal = moneyNumber(addMoney(...prevMonthSales.map((s) => s.totalAmount)))
+  const prevMonthCogs = addMoney(...prevMonthSales.map((s) => s.totalCost))
+  const prevMonthExpensesTotal = moneyNumber(addMoney(...prevMonthExpenses.map((e) => e.amount)))
+  const prevMonthGross = moneyNumber(subMoney(prevMonthSalesTotal, prevMonthCogs))
+  const prevMonthNet = moneyNumber(subMoney(prevMonthGross, prevMonthExpensesTotal))
+
+  const periodRevenue = moneyNumber(addMoney(...periodSales.map((s) => s.totalAmount)))
   const periodCogs = addMoney(...periodSales.map((s) => s.totalCost))
-  const periodGross = subMoney(periodRevenue, periodCogs)
-  const periodExpenseTotal = addMoney(...periodExpenses.map((e) => e.amount))
-  const periodNet = subMoney(periodGross, periodExpenseTotal)
-  const pendingPayments = addMoney(...pendingSales.map((s) => s.balancePending))
-  const stockValue = addMoney(...products.map((p) => money(p.costPrice).times(p.currentStock)))
+  const periodGross = moneyNumber(subMoney(periodRevenue, periodCogs))
+  const periodExpenseTotal = moneyNumber(addMoney(...periodExpenses.map((e) => e.amount)))
+  const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
+  const pendingPayments = moneyNumber(addMoney(...pendingSales.map((s) => s.balancePending)))
+  const stockValue = moneyNumber(
+    addMoney(...products.map((p) => money(p.costPrice).times(p.currentStock))),
+  )
   const lowStock = products.filter((p) => p.currentStock <= p.lowStockLevel)
-
-  const productSalesMap = new Map<string, number>()
-  for (const sale of periodSales) {
-    for (const item of sale.items) {
-      productSalesMap.set(
-        item.productName,
-        moneyNumber(money(productSalesMap.get(item.productName) || 0).plus(item.lineTotal)),
-      )
-    }
-  }
 
   const expenseByCategory = new Map<string, number>()
   for (const exp of periodExpenses) {
+    const label = expenseCategoryLabel(exp.category)
     expenseByCategory.set(
-      exp.category,
-      moneyNumber(money(expenseByCategory.get(exp.category) || 0).plus(exp.amount)),
+      label,
+      moneyNumber(money(expenseByCategory.get(label) || 0).plus(exp.amount)),
     )
   }
 
-  const monthlyNet = buildMonthlyNet(periodSales, periodExpenses)
+  const chartStart = range.from ?? monthStart
+  const chartEnd = range.to ?? new Date()
+  const days = eachDayOfInterval({
+    start: startOfDay(chartStart),
+    end: startOfDay(chartEnd > new Date() ? new Date() : chartEnd),
+  }).slice(-31)
+
+  const dailyNet = days.map((day) => {
+    const key = format(day, 'yyyy-MM-dd')
+    const daySales = periodSales.filter((s) => format(s.date, 'yyyy-MM-dd') === key)
+    const dayExpenses = periodExpenses.filter((e) => format(e.date, 'yyyy-MM-dd') === key)
+    const sales = addMoney(...daySales.map((s) => s.totalAmount))
+    const cogs = addMoney(...daySales.map((s) => s.totalCost))
+    const expenses = addMoney(...dayExpenses.map((e) => e.amount))
+    return {
+      name: format(day, 'd MMM'),
+      value: moneyNumber(subMoney(subMoney(sales, cogs), expenses)),
+      sales: moneyNumber(sales),
+      expenses: moneyNumber(expenses),
+    }
+  })
 
   return {
     range,
     cards: {
-      todaySales: moneyNumber(todaySalesTotal),
-      monthSales: moneyNumber(monthSalesTotal),
-      monthExpenses: moneyNumber(monthExpensesTotal),
-      grossProfit: moneyNumber(monthGross),
-      netProfit: moneyNumber(monthNet),
-      pendingPayments: moneyNumber(pendingPayments),
-      stockValue: moneyNumber(stockValue),
+      todaySales: todaySalesTotal,
+      monthSales: monthSalesTotal,
+      monthExpenses: monthExpensesTotal,
+      grossProfit: monthGross,
+      netProfit: monthNet,
+      pendingPayments,
+      stockValue,
       lowStockCount: lowStock.length,
-      periodRevenue: moneyNumber(periodRevenue),
-      periodExpenses: moneyNumber(periodExpenseTotal),
-      periodGross: moneyNumber(periodGross),
-      periodNet: moneyNumber(periodNet),
+      periodRevenue,
+      periodExpenses: periodExpenseTotal,
+      periodGross,
+      periodNet,
+      trends: {
+        todaySales: pctChange(todaySalesTotal, yesterdaySalesTotal),
+        monthSales: pctChange(monthSalesTotal, prevMonthSalesTotal),
+        monthExpenses: pctChange(monthExpensesTotal, prevMonthExpensesTotal),
+        netProfit: pctChange(monthNet, prevMonthNet),
+      },
     },
     recentSales,
     recentExpenses,
@@ -148,44 +208,13 @@ export async function getDashboardData(
     pendingCustomers: pendingSales,
     charts: {
       salesVsExpenses: [
-        { name: 'Sales', value: moneyNumber(periodRevenue) },
-        { name: 'Expenses', value: moneyNumber(periodExpenseTotal) },
+        { name: 'Sales', value: periodRevenue },
+        { name: 'Expenses', value: periodExpenseTotal },
       ],
-      monthlyNet,
-      salesByProduct: [...productSalesMap.entries()]
+      dailyNet,
+      expensesByCategory: [...expenseByCategory.entries()]
         .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 8),
-      expensesByCategory: [...expenseByCategory.entries()].map(([name, value]) => ({
-        name,
-        value,
-      })),
+        .sort((a, b) => b.value - a.value),
     },
   }
-}
-
-function buildMonthlyNet(
-  sales: { date: Date; totalAmount: unknown; totalCost: unknown }[],
-  expenses: { date: Date; amount: unknown }[],
-) {
-  const map = new Map<string, { sales: ReturnType<typeof money>; cogs: ReturnType<typeof money>; expenses: ReturnType<typeof money> }>()
-  for (const s of sales) {
-    const key = `${s.date.getUTCFullYear()}-${String(s.date.getUTCMonth() + 1).padStart(2, '0')}`
-    const row = map.get(key) || { sales: money(0), cogs: money(0), expenses: money(0) }
-    row.sales = row.sales.plus(money(s.totalAmount as never))
-    row.cogs = row.cogs.plus(money(s.totalCost as never))
-    map.set(key, row)
-  }
-  for (const e of expenses) {
-    const key = `${e.date.getUTCFullYear()}-${String(e.date.getUTCMonth() + 1).padStart(2, '0')}`
-    const row = map.get(key) || { sales: money(0), cogs: money(0), expenses: money(0) }
-    row.expenses = row.expenses.plus(money(e.amount as never))
-    map.set(key, row)
-  }
-  return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, row]) => ({
-      name,
-      value: moneyNumber(subMoney(subMoney(row.sales, row.cogs), row.expenses)),
-    }))
 }
