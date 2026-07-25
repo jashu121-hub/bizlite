@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation'
 import { format } from 'date-fns'
 
-import { updateSaleAction } from '@/actions/sales'
 import { PageHeader } from '@/components/shared/page-header'
 import { requireProfile } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
@@ -75,6 +74,7 @@ export default async function EditSalePage({
     <div className="space-y-6">
       <PageHeader title={`Edit ${sale.invoiceNumber}`} description="Changes will reconcile stock." />
       <SalesForm
+        saleId={id}
         products={productOptions}
         customers={customers}
         currency={profile.currency}
@@ -91,7 +91,6 @@ export default async function EditSalePage({
           paymentMethod: sale.paymentMethod,
           notes: sale.notes ?? '',
         }}
-        onSubmit={updateSaleAction.bind(null, id)}
       />
     </div>
   )

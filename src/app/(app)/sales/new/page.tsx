@@ -1,4 +1,3 @@
-import { createSaleAction } from '@/actions/sales'
 import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
 import { PageHeader } from '@/components/shared/page-header'
@@ -35,7 +34,6 @@ export default async function NewSalePage() {
         }))}
         customers={customers}
         currency={profile.currency}
-        onSubmit={createSaleAction}
       />
     </div>
   )

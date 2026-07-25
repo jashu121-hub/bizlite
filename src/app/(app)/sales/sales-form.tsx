@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
+import { createSaleAction, updateSaleAction } from '@/actions/sales'
 import { CustomerSelector, type CustomerOption } from '@/components/shared/customer-selector'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { ProductSelector, type ProductOption } from '@/components/shared/product-selector'
@@ -23,9 +24,11 @@ type SalesFormProps = {
   customers: CustomerOption[]
   currency: string
   initial?: Partial<SaleInput>
+  /** When set, form updates this sale instead of creating a new one. */
+  saleId?: string
   productsLoading?: boolean
   productsError?: string | null
-  onSubmit: (data: SaleInput) => Promise<any>
+  onSubmit?: (data: SaleInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
   onDirtyChange?: (dirty: boolean) => void
@@ -39,6 +42,7 @@ export function SalesForm({
   customers,
   currency,
   initial,
+  saleId,
   productsLoading = false,
   productsError = null,
   onSubmit,
@@ -173,7 +177,11 @@ export function SalesForm({
             }
           }
 
-          const result = await onSubmit(data)
+          const result = onSubmit
+            ? await onSubmit(data)
+            : saleId
+              ? await updateSaleAction(saleId, data)
+              : await createSaleAction(data)
           if (!result.success) {
             toast.error(result.error)
             return
@@ -184,7 +192,7 @@ export function SalesForm({
             router.refresh()
             return
           }
-          router.push(`/sales/${result.data?.id ?? ''}`)
+          router.push(`/sales/${result.data?.id ?? saleId ?? ''}`)
           router.refresh()
         }),
       )}
