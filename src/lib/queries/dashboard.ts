@@ -18,6 +18,35 @@ function pctChange(current: number, previous: number): number | null {
   return ((current - previous) / Math.abs(previous)) * 100
 }
 
+async function sumSales(
+  userId: string,
+  from: Date,
+  to?: Date,
+): Promise<{ total: number; cost: number }> {
+  const rows = await prisma.sale.findMany({
+    where: {
+      userId,
+      date: to ? { gte: from, lte: to } : { gte: from },
+    },
+    select: { totalAmount: true, totalCost: true },
+  })
+  return {
+    total: moneyNumber(addMoney(...rows.map((s) => s.totalAmount))),
+    cost: moneyNumber(addMoney(...rows.map((s) => s.totalCost))),
+  }
+}
+
+async function sumExpenses(userId: string, from: Date, to?: Date): Promise<number> {
+  const agg = await prisma.expense.aggregate({
+    where: {
+      userId,
+      date: to ? { gte: from, lte: to } : { gte: from },
+    },
+    _sum: { amount: true },
+  })
+  return moneyNumber(agg._sum.amount || 0)
+}
+
 export async function getDashboardData(
   userId: string,
   preset: DateFilterPreset = 'month',
@@ -34,44 +63,15 @@ export async function getDashboardData(
   const prevMonthStart = startOfMonth(subMonths(new Date(), 1))
   const prevMonthEnd = endOfMonth(subMonths(new Date(), 1))
 
-  const [
-    todaySales,
-    yesterdaySales,
-    monthSales,
-    monthExpenses,
-    prevMonthSales,
-    prevMonthExpenses,
-    periodSales,
-    periodExpenses,
-    products,
-    recentSales,
-    recentExpenses,
-    pendingSales,
-  ] = await Promise.all([
-    prisma.sale.findMany({
-      where: { userId, date: { gte: todayStart } },
-      select: { totalAmount: true, totalCost: true },
-    }),
-    prisma.sale.findMany({
-      where: { userId, date: { gte: yesterdayStart, lte: yesterdayEnd } },
-      select: { totalAmount: true },
-    }),
-    prisma.sale.findMany({
-      where: { userId, date: { gte: monthStart, lte: monthEnd } },
-      select: { totalAmount: true, totalCost: true },
-    }),
-    prisma.expense.findMany({
-      where: { userId, date: { gte: monthStart, lte: monthEnd } },
-      select: { amount: true },
-    }),
-    prisma.sale.findMany({
-      where: { userId, date: { gte: prevMonthStart, lte: prevMonthEnd } },
-      select: { totalAmount: true, totalCost: true },
-    }),
-    prisma.expense.findMany({
-      where: { userId, date: { gte: prevMonthStart, lte: prevMonthEnd } },
-      select: { amount: true },
-    }),
+  // Keep concurrency low for serverless DB pools
+  const todaySales = await sumSales(userId, todayStart)
+  const yesterdaySales = await sumSales(userId, yesterdayStart, yesterdayEnd)
+  const monthSales = await sumSales(userId, monthStart, monthEnd)
+  const monthExpensesTotal = await sumExpenses(userId, monthStart, monthEnd)
+  const prevMonthSales = await sumSales(userId, prevMonthStart, prevMonthEnd)
+  const prevMonthExpensesTotal = await sumExpenses(userId, prevMonthStart, prevMonthEnd)
+
+  const [periodSales, periodExpenses, products] = await Promise.all([
     prisma.sale.findMany({
       where: { userId, ...(dateFilter ? { date: dateFilter } : {}) },
       select: {
@@ -79,13 +79,11 @@ export async function getDashboardData(
         date: true,
         totalAmount: true,
         totalCost: true,
-        grossProfit: true,
-        amountPaid: true,
         balancePending: true,
         invoiceNumber: true,
         paymentStatus: true,
         customer: { select: { name: true } },
-        items: { select: { productName: true, quantity: true, lineTotal: true } },
+        items: { select: { productName: true, lineTotal: true } },
       },
       orderBy: { date: 'desc' },
     }),
@@ -102,9 +100,11 @@ export async function getDashboardData(
         currentStock: true,
         lowStockLevel: true,
         costPrice: true,
-        sellingPrice: true,
       },
     }),
+  ])
+
+  const [recentSales, recentExpenses, pendingSales] = await Promise.all([
     prisma.sale.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
@@ -124,18 +124,13 @@ export async function getDashboardData(
     }),
   ])
 
-  const todaySalesTotal = moneyNumber(addMoney(...todaySales.map((s) => s.totalAmount)))
-  const yesterdaySalesTotal = moneyNumber(addMoney(...yesterdaySales.map((s) => s.totalAmount)))
-  const monthSalesTotal = moneyNumber(addMoney(...monthSales.map((s) => s.totalAmount)))
-  const monthCogs = addMoney(...monthSales.map((s) => s.totalCost))
-  const monthExpensesTotal = moneyNumber(addMoney(...monthExpenses.map((e) => e.amount)))
-  const monthGross = moneyNumber(subMoney(monthSalesTotal, monthCogs))
+  const todaySalesTotal = todaySales.total
+  const yesterdaySalesTotal = yesterdaySales.total
+  const monthSalesTotal = monthSales.total
+  const monthGross = moneyNumber(subMoney(monthSales.total, monthSales.cost))
   const monthNet = moneyNumber(subMoney(monthGross, monthExpensesTotal))
 
-  const prevMonthSalesTotal = moneyNumber(addMoney(...prevMonthSales.map((s) => s.totalAmount)))
-  const prevMonthCogs = addMoney(...prevMonthSales.map((s) => s.totalCost))
-  const prevMonthExpensesTotal = moneyNumber(addMoney(...prevMonthExpenses.map((e) => e.amount)))
-  const prevMonthGross = moneyNumber(subMoney(prevMonthSalesTotal, prevMonthCogs))
+  const prevMonthGross = moneyNumber(subMoney(prevMonthSales.total, prevMonthSales.cost))
   const prevMonthNet = moneyNumber(subMoney(prevMonthGross, prevMonthExpensesTotal))
 
   const periodRevenue = moneyNumber(addMoney(...periodSales.map((s) => s.totalAmount)))
@@ -197,7 +192,7 @@ export async function getDashboardData(
       periodNet,
       trends: {
         todaySales: pctChange(todaySalesTotal, yesterdaySalesTotal),
-        monthSales: pctChange(monthSalesTotal, prevMonthSalesTotal),
+        monthSales: pctChange(monthSalesTotal, prevMonthSales.total),
         monthExpenses: pctChange(monthExpensesTotal, prevMonthExpensesTotal),
         netProfit: pctChange(monthNet, prevMonthNet),
       },
