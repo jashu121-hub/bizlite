@@ -1,20 +1,160 @@
 'use client'
-import { useTransition } from 'react'
+
+import { useEffect, useTransition } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { productSchema, type ProductInput } from '@/lib/validations/product'
-import { PRODUCT_CATEGORIES } from '@/lib/constants'
+
+import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { CurrencyInput } from '@/components/shared/currency-input'
+import { Textarea } from '@/components/ui/textarea'
+import { PRODUCT_CATEGORIES } from '@/lib/constants'
+import { productSchema, type ProductInput } from '@/lib/validations/product'
+import { cn } from '@/lib/utils'
 
-export function ProductForm({ currency, initial, onSubmit }: { currency: string; initial?: Partial<ProductInput>; onSubmit: (data: ProductInput) => Promise<any> }) {
- const router=useRouter();const [pending,startTransition]=useTransition();const form=useForm<any>({resolver:zodResolver(productSchema),defaultValues:{name:'',category:'General',sku:'',costPrice:'0',sellingPrice:'0',openingStock:0,lowStockLevel:5,notes:'',isActive:true,...initial}})
- const submit=(data:ProductInput)=>startTransition(async()=>{const r=await onSubmit(data);if(!r.success){toast.error(r.error);return}toast.success(r.message??'Product saved');router.push('/products');router.refresh()})
- const field=(label:string,name:keyof ProductInput,type='text')=><div className="space-y-2"><Label>{label}</Label><Input type={type} {...form.register(name as never,{valueAsNumber:type==='number'})}/><p className="text-sm text-red-600">{String(form.formState.errors[name]?.message ?? '')}</p></div>
- return <form onSubmit={form.handleSubmit(submit)} className="mx-auto max-w-2xl space-y-5"><div className="grid gap-5 sm:grid-cols-2">{field('Product name','name')}<div className="space-y-2"><Label>Category</Label><select className="h-10 w-full rounded-md border bg-transparent px-3" {...form.register('category')}>{PRODUCT_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div></div><div className="grid gap-5 sm:grid-cols-2">{field('SKU','sku')}<div className="space-y-2"><Label>Active</Label><label className="flex h-10 items-center gap-2"><input type="checkbox" {...form.register('isActive')}/> Available for sale</label></div></div><div className="grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label>Cost price</Label><CurrencyInput currency={currency} value={form.watch('costPrice')} onChange={v=>form.setValue('costPrice',v,{shouldValidate:true})}/></div><div className="space-y-2"><Label>Selling price</Label><CurrencyInput currency={currency} value={form.watch('sellingPrice')} onChange={v=>form.setValue('sellingPrice',v,{shouldValidate:true})}/></div></div><div className="grid gap-5 sm:grid-cols-2">{field('Opening stock','openingStock','number')}{field('Low stock alert level','lowStockLevel','number')}</div><div className="space-y-2"><Label>Notes</Label><Textarea {...form.register('notes')}/></div><div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={()=>router.back()}>Cancel</Button><Button disabled={pending}>{pending?'Saving…':'Save product'}</Button></div></form>
+type ProductFormProps = {
+  currency: string
+  initial?: Partial<ProductInput>
+  onSubmit: (data: ProductInput) => Promise<any>
+  onSuccess?: () => void
+  onCancel?: () => void
+  onDirtyChange?: (dirty: boolean) => void
+  className?: string
+}
+
+export function ProductForm({
+  currency,
+  initial,
+  onSubmit,
+  onSuccess,
+  onCancel,
+  onDirtyChange,
+  className,
+}: ProductFormProps) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const form = useForm<any>({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      name: '',
+      category: 'General',
+      sku: '',
+      costPrice: '0',
+      sellingPrice: '0',
+      openingStock: 0,
+      lowStockLevel: 5,
+      notes: '',
+      isActive: true,
+      ...initial,
+    },
+  })
+
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty)
+  }, [form.formState.isDirty, onDirtyChange])
+
+  const submit = (data: ProductInput) =>
+    startTransition(async () => {
+      const result = await onSubmit(data)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(result.message ?? 'Product saved')
+      if (onSuccess) {
+        onSuccess()
+        router.refresh()
+        return
+      }
+      router.push('/products')
+      router.refresh()
+    })
+
+  const field = (label: string, name: keyof ProductInput, type = 'text') => (
+    <div className="space-y-2">
+      <Label htmlFor={String(name)}>{label}</Label>
+      <Input
+        id={String(name)}
+        type={type}
+        {...form.register(name as never, { valueAsNumber: type === 'number' })}
+      />
+      <p className="text-sm text-red-600" role="alert">
+        {String(form.formState.errors[name]?.message ?? '')}
+      </p>
+    </div>
+  )
+
+  return (
+    <form onSubmit={form.handleSubmit(submit)} className={cn('space-y-5', className)}>
+      <div className="grid gap-5 sm:grid-cols-2">
+        {field('Product name', 'name')}
+        <div className="space-y-2">
+          <Label htmlFor="category">Category</Label>
+          <select
+            id="category"
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('category')}
+          >
+            {PRODUCT_CATEGORIES.map((category) => (
+              <option key={category}>{category}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        {field('SKU', 'sku')}
+        <div className="space-y-2">
+          <Label>Active</Label>
+          <label className="flex h-10 items-center gap-2 text-sm">
+            <input type="checkbox" {...form.register('isActive')} />
+            Available for sale
+          </label>
+        </div>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Cost price</Label>
+          <CurrencyInput
+            currency={currency}
+            value={form.watch('costPrice')}
+            onChange={(value) =>
+              form.setValue('costPrice', value, { shouldValidate: true, shouldDirty: true })
+            }
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Selling price</Label>
+          <CurrencyInput
+            currency={currency}
+            value={form.watch('sellingPrice')}
+            onChange={(value) =>
+              form.setValue('sellingPrice', value, { shouldValidate: true, shouldDirty: true })
+            }
+          />
+        </div>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        {field('Opening stock', 'openingStock', 'number')}
+        {field('Low stock alert level', 'lowStockLevel', 'number')}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="notes">Notes</Label>
+        <Textarea id="notes" {...form.register('notes')} />
+      </div>
+      <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={() => (onCancel ? onCancel() : router.back())}
+        >
+          Cancel
+        </Button>
+        <Button disabled={pending}>{pending ? 'Saving…' : 'Save product'}</Button>
+      </div>
+    </form>
+  )
 }
