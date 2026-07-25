@@ -1,4 +1,4 @@
-import type { PaymentMethod, Prisma } from '@prisma/client'
+import type { PaymentMethod, Prisma, Product } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   addMoney,
@@ -10,6 +10,8 @@ import {
 } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
 import type { SaleInput } from '@/lib/validations/sale'
+
+const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const
 
 async function nextInvoiceNumber(userId: string, tx: Prisma.TransactionClient) {
   const year = new Date().getFullYear()
@@ -27,18 +29,29 @@ async function buildSaleLines(
   userId: string,
   items: SaleInput['items'],
   tx: Prisma.TransactionClient,
-  stockMap?: Map<string, number>,
+  options?: {
+    stockMap?: Map<string, number>
+    productMap?: Map<string, Product>
+  },
 ) {
+  const stockMap = options?.stockMap
+  const productMap = options?.productMap
   const lines = []
+
   for (const item of items) {
-    const product = await tx.product.findFirst({
-      where: { id: item.productId, userId, isActive: true },
-    })
+    let product = productMap?.get(item.productId) ?? null
+    if (!product) {
+      product = await tx.product.findFirst({
+        where: { id: item.productId, userId, isActive: true },
+      })
+    }
     if (!product) throw new Error('One or more products were not found')
+
     const available = stockMap?.get(product.id) ?? product.currentStock
     if (item.quantity > available) {
       throw new Error(`Insufficient stock for ${product.name}. Available: ${available}`)
     }
+
     const unitPrice = money(item.unitSellingPrice)
     const unitCost = money(product.costPrice)
     const lineTotal = mulMoney(unitPrice, item.quantity)
@@ -55,6 +68,7 @@ async function buildSaleLines(
     })
     if (stockMap) stockMap.set(product.id, available - item.quantity)
   }
+
   return lines
 }
 
@@ -70,7 +84,14 @@ function totalsFromLines(lines: Awaited<ReturnType<typeof buildSaleLines>>, disc
 
 export async function createSaleTransaction(userId: string, input: SaleInput) {
   return prisma.$transaction(async (tx) => {
-    const lines = await buildSaleLines(userId, input.items, tx)
+    const productIds = [...new Set(input.items.map((item) => item.productId))]
+    const products = await tx.product.findMany({
+      where: { userId, id: { in: productIds }, isActive: true },
+    })
+    const productMap = new Map(products.map((product) => [product.id, product]))
+    const stockMap = new Map(products.map((product) => [product.id, product.currentStock]))
+
+    const lines = await buildSaleLines(userId, input.items, tx, { stockMap, productMap })
     const totals = totalsFromLines(lines, input.discount)
     let amountPaid = money(input.amountPaid)
     if (amountPaid.gt(totals.totalAmount)) amountPaid = totals.totalAmount
@@ -117,23 +138,34 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
       include: { items: true, customer: true },
     })
 
+    const stockByProduct = new Map<string, number>()
     for (const line of lines) {
-      await tx.product.update({
-        where: { id: line.product.id },
-        data: { currentStock: { decrement: line.quantity } },
-      })
-      await tx.stockMovement.create({
-        data: {
-          userId,
-          productId: line.product.id,
-          type: 'SALE',
-          quantity: -line.quantity,
-          date,
-          notes: `Sale ${invoiceNumber}`,
-          saleId: sale.id,
-        },
-      })
+      stockByProduct.set(
+        line.product.id,
+        (stockByProduct.get(line.product.id) ?? 0) + line.quantity,
+      )
     }
+
+    await Promise.all(
+      [...stockByProduct.entries()].map(([productId, quantity]) =>
+        tx.product.update({
+          where: { id: productId },
+          data: { currentStock: { decrement: quantity } },
+        }),
+      ),
+    )
+
+    await tx.stockMovement.createMany({
+      data: lines.map((line) => ({
+        userId,
+        productId: line.product.id,
+        type: 'SALE' as const,
+        quantity: -line.quantity,
+        date,
+        notes: `Sale ${invoiceNumber}`,
+        saleId: sale.id,
+      })),
+    })
 
     if (customerId && amountPaid.gt(0)) {
       await tx.customerPayment.create({
@@ -150,7 +182,7 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
     }
 
     return sale
-  })
+  }, TX_OPTIONS)
 }
 
 export async function updateSaleTransaction(userId: string, saleId: string, input: SaleInput) {
@@ -161,35 +193,38 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
     })
     if (!existing) throw new Error('Sale not found')
 
-    for (const item of existing.items) {
-      if (!item.productId) continue
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { currentStock: { increment: item.quantity } },
-      })
-      await tx.stockMovement.create({
-        data: {
-          userId,
-          productId: item.productId,
-          type: 'SALE_REVERSAL',
-          quantity: item.quantity,
-          date: toDateOnly(input.date),
-          notes: `Edit reversal for ${existing.invoiceNumber}`,
-          saleId: existing.id,
-        },
-      })
-    }
-
-    await tx.stockMovement.deleteMany({
-      where: { saleId: existing.id, type: 'SALE', userId },
-    })
-    await tx.saleItem.deleteMany({ where: { saleId: existing.id } })
+    const productIds = [
+      ...new Set([
+        ...existing.items
+          .map((item) => item.productId)
+          .filter((id): id is string => Boolean(id)),
+        ...input.items.map((item) => item.productId),
+      ]),
+    ]
 
     const products = await tx.product.findMany({
-      where: { userId, id: { in: input.items.map((i) => i.productId) } },
+      where: { userId, id: { in: productIds } },
     })
-    const stockMap = new Map(products.map((p) => [p.id, p.currentStock]))
-    const lines = await buildSaleLines(userId, input.items, tx, stockMap)
+    const productMap = new Map(products.map((product) => [product.id, product]))
+
+    const reservedByProduct = new Map<string, number>()
+    for (const item of existing.items) {
+      if (!item.productId) continue
+      reservedByProduct.set(
+        item.productId,
+        (reservedByProduct.get(item.productId) ?? 0) + item.quantity,
+      )
+    }
+
+    // Stock as if this sale were reversed, so validation matches the edit form
+    const stockMap = new Map(
+      products.map((product) => [
+        product.id,
+        product.currentStock + (reservedByProduct.get(product.id) ?? 0),
+      ]),
+    )
+
+    const lines = await buildSaleLines(userId, input.items, tx, { stockMap, productMap })
     const totals = totalsFromLines(lines, input.discount)
 
     const extraPaid = existing.payments
@@ -210,23 +245,56 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       if (!customer) throw new Error('Customer not found')
     }
 
-    for (const line of lines) {
-      await tx.product.update({
-        where: { id: line.product.id },
-        data: { currentStock: { decrement: line.quantity } },
-      })
-      await tx.stockMovement.create({
-        data: {
+    const affectedProductIds = new Set([
+      ...reservedByProduct.keys(),
+      ...lines.map((line) => line.product.id),
+    ])
+
+    await Promise.all(
+      [...affectedProductIds].map((productId) => {
+        const product = productMap.get(productId)
+        if (!product) return Promise.resolve()
+        const newStock = stockMap.get(productId) ?? product.currentStock
+        return tx.product.update({
+          where: { id: productId },
+          data: { currentStock: newStock },
+        })
+      }),
+    )
+
+    await Promise.all([
+      tx.stockMovement.deleteMany({
+        where: { saleId: existing.id, type: 'SALE', userId },
+      }),
+      tx.saleItem.deleteMany({ where: { saleId: existing.id } }),
+    ])
+
+    const reversalItems = existing.items.filter((item) => item.productId)
+    if (reversalItems.length > 0) {
+      await tx.stockMovement.createMany({
+        data: reversalItems.map((item) => ({
           userId,
-          productId: line.product.id,
-          type: 'SALE',
-          quantity: -line.quantity,
+          productId: item.productId!,
+          type: 'SALE_REVERSAL' as const,
+          quantity: item.quantity,
           date,
-          notes: `Sale ${existing.invoiceNumber}`,
+          notes: `Edit reversal for ${existing.invoiceNumber}`,
           saleId: existing.id,
-        },
+        })),
       })
     }
+
+    await tx.stockMovement.createMany({
+      data: lines.map((line) => ({
+        userId,
+        productId: line.product.id,
+        type: 'SALE' as const,
+        quantity: -line.quantity,
+        date,
+        notes: `Sale ${existing.invoiceNumber}`,
+        saleId: existing.id,
+      })),
+    })
 
     const sale = await tx.sale.update({
       where: { id: existing.id },
@@ -260,7 +328,7 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
     })
 
     return sale
-  })
+  }, TX_OPTIONS)
 }
 
 export async function deleteSaleTransaction(userId: string, saleId: string) {
@@ -271,27 +339,41 @@ export async function deleteSaleTransaction(userId: string, saleId: string) {
     })
     if (!sale) throw new Error('Sale not found')
 
+    const stockByProduct = new Map<string, number>()
     for (const item of sale.items) {
       if (!item.productId) continue
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { currentStock: { increment: item.quantity } },
-      })
-      await tx.stockMovement.create({
-        data: {
+      stockByProduct.set(
+        item.productId,
+        (stockByProduct.get(item.productId) ?? 0) + item.quantity,
+      )
+    }
+
+    await Promise.all(
+      [...stockByProduct.entries()].map(([productId, quantity]) =>
+        tx.product.update({
+          where: { id: productId },
+          data: { currentStock: { increment: quantity } },
+        }),
+      ),
+    )
+
+    const reversalItems = sale.items.filter((item) => item.productId)
+    if (reversalItems.length > 0) {
+      await tx.stockMovement.createMany({
+        data: reversalItems.map((item) => ({
           userId,
-          productId: item.productId,
-          type: 'SALE_REVERSAL',
+          productId: item.productId!,
+          type: 'SALE_REVERSAL' as const,
           quantity: item.quantity,
           date: sale.date,
           notes: `Deleted sale ${sale.invoiceNumber}`,
           saleId: sale.id,
-        },
+        })),
       })
     }
 
     await tx.customerPayment.deleteMany({ where: { saleId: sale.id, userId } })
     await tx.sale.delete({ where: { id: sale.id } })
     return { id: sale.id }
-  })
+  }, TX_OPTIONS)
 }
