@@ -141,6 +141,15 @@ export default function RegisterPage() {
       </Form>
 
       <p className="text-center text-sm text-muted-foreground">
+        Want to explore first?{' '}
+        <Link
+          href="/login"
+          className="font-medium text-teal-700 hover:text-teal-800 dark:text-teal-400"
+        >
+          Try the demo from Sign in
+        </Link>
+      </p>
+      <p className="text-center text-sm text-muted-foreground">
         Already have an account?{' '}
         <Link
           href="/login"

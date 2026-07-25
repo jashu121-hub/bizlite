@@ -34,27 +34,40 @@ export default function LoginPage() {
     },
   })
 
+  const finishLogin = async (email: string, password: string, welcome = 'Welcome back') => {
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      toast.error(friendlyAuthError(error.message))
+      return false
+    }
+    toast.success(welcome)
+    const next = searchParams.get('next')
+    router.push(next && next.startsWith('/') ? next : '/dashboard')
+    router.refresh()
+    return true
+  }
+
   const onSubmit = async (values: LoginInput) => {
     setSubmitting(true)
     try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.signInWithPassword({
-        email: values.email,
-        password: values.password,
-      })
-
-      if (error) {
-        toast.error(friendlyAuthError(error.message))
-        return
-      }
-
-      toast.success('Welcome back')
-      const next = searchParams.get('next')
-      router.push(next && next.startsWith('/') ? next : '/dashboard')
-      router.refresh()
+      await finishLogin(values.email, values.password)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to sign in. Please try again.'
+      toast.error(friendlyAuthError(message))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const onDemoLogin = async () => {
+    setSubmitting(true)
+    try {
+      await finishLogin('demo@bizlite.app', 'Demo1234!', 'Demo mode unlocked')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to open demo. Please try again.'
       toast.error(friendlyAuthError(message))
     } finally {
       setSubmitting(false)
@@ -116,6 +129,25 @@ export default function LoginPage() {
           </Button>
         </form>
       </Form>
+
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-card px-2 text-muted-foreground">or</span>
+        </div>
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        disabled={submitting}
+        onClick={() => void onDemoLogin()}
+      >
+        {submitting ? 'Opening demo…' : 'Try demo (no signup)'}
+      </Button>
 
       <p className="text-center text-sm text-muted-foreground">
         New to BizLite?{' '}
