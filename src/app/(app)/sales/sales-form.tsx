@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useTransition } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import { useEffect, useTransition } from 'react'
+import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -63,19 +63,15 @@ export function SalesForm({
     },
   })
   const itemsArray = useFieldArray({ control: form.control, name: 'items' })
-  const items = form.watch('items') ?? []
-  const discountValue = Number(form.watch('discount')) || 0
-  const amountPaid = Number(form.watch('amountPaid')) || 0
+  const items = useWatch({ control: form.control, name: 'items' }) ?? []
+  const discountValue = Number(useWatch({ control: form.control, name: 'discount' })) || 0
+  const amountPaid = Number(useWatch({ control: form.control, name: 'amountPaid' })) || 0
 
-  const lineTotals = useMemo(
-    () =>
-      items.map(
-        (item: { quantity?: number; unitSellingPrice?: string }) =>
-          (Number(item.quantity) || 0) * (Number(item.unitSellingPrice) || 0),
-      ),
-    [items],
+  const subtotal = items.reduce(
+    (sum: number, item: { quantity?: number; unitSellingPrice?: string }) =>
+      sum + (Number(item?.quantity) || 0) * (Number(item?.unitSellingPrice) || 0),
+    0,
   )
-  const subtotal = lineTotals.reduce((sum: number, value: number) => sum + value, 0)
   const total = Math.max(0, subtotal - Math.max(0, discountValue))
   const balance = Math.max(0, total - amountPaid)
 
