@@ -231,6 +231,8 @@ export async function getReportsData(userId: string, params: DashboardDateParams
 
   const needsClassification = expenses.filter((expense) => expenseNeedsClassification(expense.costType))
 
+  const productNameById = new Map(products.map((product) => [product.id, product.name]))
+
   const productPerformance = new Map<
     string,
     {
@@ -244,13 +246,17 @@ export async function getReportsData(userId: string, params: DashboardDateParams
   for (const sale of sales) {
     for (const item of sale.items) {
       const key = item.productId ?? item.productName
+      const currentName =
+        (item.productId ? productNameById.get(item.productId) : undefined) ?? item.productName
       const row = productPerformance.get(key) ?? {
-        product: item.productName,
+        product: currentName,
         quantitySold: 0,
         salesAmount: money(0),
         cost: money(0),
         grossProfit: money(0),
       }
+      // Prefer the live product name if the catalog was renamed after the sale
+      row.product = currentName
       row.quantitySold += item.quantity
       row.salesAmount = row.salesAmount.plus(item.lineTotal)
       row.cost = row.cost.plus(item.lineCost)

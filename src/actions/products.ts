@@ -94,22 +94,32 @@ export async function updateProductAction(id: string, raw: unknown) {
     const existing = await prisma.product.findFirst({ where: { id, userId: user.id } })
     if (!existing) return fail('Product not found')
     const data = parsed.data
-    await prisma.product.update({
-      where: { id },
-      data: {
-        name: data.name.trim(),
-        category: data.category,
-        sku: data.sku || null,
-        costPrice: prismaDecimal(data.costPrice),
-        sellingPrice: prismaDecimal(data.sellingPrice),
-        // Keep stock immutable via product edit
-        openingStock: existing.openingStock,
-        currentStock: existing.currentStock,
-        lowStockLevel: data.lowStockLevel,
-        notes: data.notes || null,
-        isActive: data.isActive,
-        costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
-      },
+    const nextName = data.name.trim()
+    await prisma.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id },
+        data: {
+          name: nextName,
+          category: data.category,
+          sku: data.sku || null,
+          costPrice: prismaDecimal(data.costPrice),
+          sellingPrice: prismaDecimal(data.sellingPrice),
+          // Keep stock immutable via product edit
+          openingStock: existing.openingStock,
+          currentStock: existing.currentStock,
+          lowStockLevel: data.lowStockLevel,
+          notes: data.notes || null,
+          isActive: data.isActive,
+          costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
+        },
+      })
+      // Keep denormalized sale line names in sync (reports, invoices, dashboard)
+      if (nextName !== existing.name) {
+        await tx.saleItem.updateMany({
+          where: { productId: id },
+          data: { productName: nextName },
+        })
+      }
     })
     revalidateProductPaths(id)
     return ok({ id }, 'Product updated')
