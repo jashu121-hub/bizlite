@@ -30,8 +30,21 @@ function round4(value: number): number {
   return Math.round((value + Number.EPSILON) * 10000) / 10000
 }
 
-export function computeLineDetail(line: CostLine): LineCostDetail {
-  const method = line.method || (n(line.fixedTotal) > 0 && !n(line.unitCost) ? 'fixedBatch' : 'qtyUnit')
+function categoryKey(category: string): string {
+  const c = category.trim().toLowerCase()
+  if (c.includes('material')) return 'materials'
+  if (c.includes('labour') || c.includes('labor')) return 'labour'
+  if (c.includes('packag')) return 'packaging'
+  if (c.includes('transport')) return 'transport'
+  return 'other'
+}
+
+export function computeLineDetail(
+  line: CostLine,
+  finishedSaleableQty = 0,
+): LineCostDetail {
+  const method =
+    line.method || (n(line.fixedTotal) > 0 && !n(line.unitCost) ? 'fixedBatch' : 'qtyUnit')
   const base: LineCostDetail = {
     id: line.id,
     total: 0,
@@ -51,12 +64,17 @@ export function computeLineDetail(line: CostLine): LineCostDetail {
     return base
   }
 
-  if (method === 'qtyUnit') {
+  if (method === 'qtyUnit' || method === 'labourHours') {
     base.total = round2(Math.max(0, n(line.quantity)) * Math.max(0, n(line.unitCost)))
     return base
   }
 
-  // Bulk Purchase Usage — only consumed value enters the batch
+  if (method === 'perFinishedUnit') {
+    base.total = round2(Math.max(0, n(line.unitCost)) * Math.max(0, finishedSaleableQty))
+    return base
+  }
+
+  // Bulk Material Consumption — only consumed value enters the batch
   const purchaseQty = Math.max(0, n(line.bulkPurchaseQty))
   const purchaseAmount = Math.max(0, n(line.bulkPurchaseAmount))
   const usedQty = Math.max(0, n(line.quantityUsed))
@@ -84,7 +102,6 @@ export function computeLineDetail(line: CostLine): LineCostDetail {
   }
 
   const bulkUnitCostBase = safeDiv(purchaseAmount, shared.purchaseBase)
-  // Display purchase cost per usage unit (e.g. AED/metre or AED/gram)
   const oneUsageInBase = convertQuantity(1, usageUnit, shared.baseUnit)
   base.bulkUnitCost =
     oneUsageInBase != null ? round4(bulkUnitCostBase * oneUsageInBase) : round4(bulkUnitCostBase)
@@ -104,16 +121,19 @@ export function computeLineDetail(line: CostLine): LineCostDetail {
   return base
 }
 
-/** Line cost included in Total Batch Cost (consumed amount only). */
-export function lineTotal(line: CostLine): number {
-  return computeLineDetail(line).total
+export function lineTotal(line: CostLine, finishedSaleableQty = 0): number {
+  return computeLineDetail(line, finishedSaleableQty).total
 }
 
-function sumByCategory(lines: CostLine[], category: CostLine['category']): number {
+function sumByCategoryKey(
+  lines: CostLine[],
+  key: string,
+  finishedSaleableQty: number,
+): number {
   return round2(
     lines
-      .filter((l) => l.includeInUnitCost && l.category === category)
-      .reduce((sum, l) => sum + lineTotal(l), 0),
+      .filter((l) => l.includeInUnitCost && categoryKey(l.category) === key)
+      .reduce((sum, l) => sum + lineTotal(l, finishedSaleableQty), 0),
   )
 }
 
@@ -157,16 +177,18 @@ export function sellingCostsPerUnit(
 }
 
 export function computeCostPricing(payload: CostPricingPayload): CostPricingTotals {
-  const finishedQty = Math.max(0, Math.floor(n(payload.quantity)))
+  const enteredQty = Math.max(0, Math.floor(n(payload.quantity)))
   const finishedWastageQty = Math.max(0, Math.floor(n(payload.finishedWastageQty)))
-  const wastageMode = payload.wastageMode || 'materialPct'
+  // Finished wastage reduces saleable quantity; material wastage increases material cost.
+  const saleableQty = Math.max(0, enteredQty - finishedWastageQty)
+  const manufacturedQuantity = enteredQty
   const messages: string[] = []
 
-  if (finishedQty <= 0) {
-    messages.push('Finished quantity produced must be greater than zero.')
+  if (saleableQty <= 0) {
+    messages.push('Finished saleable quantity must be greater than zero.')
   }
 
-  const lineTotals = payload.lines.map((l) => computeLineDetail(l))
+  const lineTotals = payload.lines.map((l) => computeLineDetail(l, saleableQty))
 
   for (const line of payload.lines) {
     if (
@@ -207,37 +229,30 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
   const included = payload.lines.filter((l) => l.includeInUnitCost)
   const includedDetails = lineTotals.filter((d) => included.some((l) => l.id === d.id))
 
-  const materialsCost = sumByCategory(payload.lines, 'Materials')
-  const directLabourCost = sumByCategory(payload.lines, 'Direct Labour')
-  const packagingCost = sumByCategory(payload.lines, 'Packaging')
-  const transportationCost = sumByCategory(payload.lines, 'Production Transportation')
-  const designCost = sumByCategory(payload.lines, 'Design')
-  const manufacturingOverheadCost = sumByCategory(payload.lines, 'Manufacturing Overhead')
-  const otherDirectCost = sumByCategory(payload.lines, 'Other Production Cost')
+  const materialsCost = sumByCategoryKey(payload.lines, 'materials', saleableQty)
+  const directLabourCost = sumByCategoryKey(payload.lines, 'labour', saleableQty)
+  const packagingCost = sumByCategoryKey(payload.lines, 'packaging', saleableQty)
+  const transportationCost = sumByCategoryKey(payload.lines, 'transport', saleableQty)
+  const otherDirectCost = sumByCategoryKey(payload.lines, 'other', saleableQty)
 
   const sumIncludedLines = round2(includedDetails.reduce((sum, d) => sum + d.total, 0))
   const eligibleProductionCost = round2(sumIncludedLines + additionalFixed)
 
-  // Material wastage % adds a cost; finished-product wastage reduces the divisor instead.
-  const wastageCost =
-    wastageMode === 'materialPct' ? round2(eligibleProductionCost * (wastagePct / 100)) : 0
+  // Material wastage increases material cost only (not finished wastage).
+  const wastageCost = round2(materialsCost * (wastagePct / 100))
   const contingencyCost = round2(eligibleProductionCost * (contingencyPct / 100))
   const allocatedOverhead = allocateOverhead(
     payload.overheadMethod,
     overheadValue,
     eligibleProductionCost,
-    finishedQty,
+    saleableQty,
   )
 
   const totalBatchCost = round2(
     eligibleProductionCost + wastageCost + contingencyCost + allocatedOverhead,
   )
 
-  // Cost per finished saleable unit
-  const divisor = finishedQty
-  const costPerUnit = round2(safeDiv(totalBatchCost, divisor))
-  const manufacturedQuantity =
-    wastageMode === 'finishedQty' ? finishedQty + finishedWastageQty : finishedQty
+  const costPerUnit = round2(safeDiv(totalBatchCost, saleableQty))
 
   const suggestedSellingPrice = sellingPriceFromMode(
     payload.pricingMode,
@@ -252,12 +267,12 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
   const profitPerUnit = round2(suggestedSellingPrice - costPerUnit)
   const markupPct = round2(safeDiv(profitPerUnit, costPerUnit) * 100)
   const grossMarginPct = round2(safeDiv(profitPerUnit, suggestedSellingPrice) * 100)
-  const totalExpectedSales = round2(suggestedSellingPrice * finishedQty)
-  const totalExpectedGrossProfit = round2(profitPerUnit * finishedQty)
+  const totalExpectedSales = round2(suggestedSellingPrice * saleableQty)
+  const totalExpectedGrossProfit = round2(profitPerUnit * saleableQty)
 
   const fixedCosts = round2(wastageCost + contingencyCost + allocatedOverhead + additionalFixed)
   const variableBatch = round2(totalBatchCost - fixedCosts)
-  const variablePerUnit = round2(safeDiv(variableBatch, finishedQty))
+  const variablePerUnit = round2(safeDiv(variableBatch, saleableQty))
   const contribution = round2(suggestedSellingPrice - variablePerUnit)
   const breakEvenQuantity =
     contribution > 0 ? Math.ceil(safeDiv(fixedCosts, contribution)) : 0
@@ -265,6 +280,7 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
   const sellCosts = sellingCostsPerUnit(suggestedSellingPrice, payload.sellingCosts)
   const productGrossProfit = round2(suggestedSellingPrice - costPerUnit)
   const profitAfterSellingCosts = round2(suggestedSellingPrice - costPerUnit - sellCosts)
+  const totalExpectedNetProfit = round2(profitAfterSellingCosts * saleableQty)
 
   const bulkPurchaseValue = round2(
     includedDetails.reduce((s, d) => s + (d.method === 'bulkUsage' ? d.bulkPurchaseValue : 0), 0),
@@ -285,11 +301,10 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
   if (Math.abs(expectedBatch - totalBatchCost) > 0.02) {
     messages.push('Total batch cost must equal the sum of included costs.')
   }
-  if (finishedQty > 0 && Math.abs(costPerUnit - safeDiv(totalBatchCost, finishedQty)) > 0.02) {
+  if (saleableQty > 0 && Math.abs(costPerUnit - safeDiv(totalBatchCost, saleableQty)) > 0.02) {
     messages.push('Unit cost must equal total batch cost divided by finished quantity.')
   }
 
-  // Deduplicate validation messages
   const uniqueMessages = [...new Set(messages)]
 
   return {
@@ -297,16 +312,16 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
     directLabourCost,
     packagingCost,
     transportationCost,
-    otherDirectCost: round2(otherDirectCost + designCost + manufacturingOverheadCost),
-    designCost,
-    manufacturingOverheadCost,
+    otherDirectCost,
+    designCost: 0,
+    manufacturingOverheadCost: 0,
     eligibleProductionCost,
     wastageCost,
     contingencyCost,
     additionalFixedCost: additionalFixed,
     allocatedOverhead,
     totalBatchCost,
-    quantity: finishedQty,
+    quantity: saleableQty,
     manufacturedQuantity,
     finishedWastageQty,
     costPerUnit,
@@ -316,6 +331,7 @@ export function computeCostPricing(payload: CostPricingPayload): CostPricingTota
     grossMarginPct,
     totalExpectedSales,
     totalExpectedGrossProfit,
+    totalExpectedNetProfit,
     breakEvenQuantity,
     sellingCostsPerUnit: sellCosts,
     productGrossProfit,
@@ -345,4 +361,21 @@ export function autoScenarios(unitCost: number, recommended: number) {
   const low = round2(rec > 0 ? rec * 0.85 : unitCost * 1.2)
   const premium = round2(rec > 0 ? rec * 1.2 : unitCost * 1.8)
   return { low, recommended: rec, premium }
+}
+
+export function methodLabel(method: string): string {
+  switch (method) {
+    case 'fixedBatch':
+      return 'Fixed Batch Amount'
+    case 'bulkUsage':
+      return 'Bulk Material'
+    case 'qtyUnit':
+      return 'Quantity × Rate'
+    case 'labourHours':
+      return 'Labour Hours × Rate'
+    case 'perFinishedUnit':
+      return 'Per Finished Unit'
+    default:
+      return method
+  }
 }

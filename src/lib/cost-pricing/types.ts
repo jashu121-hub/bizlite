@@ -1,13 +1,12 @@
-export type CostLineCategory =
-  | 'Materials'
-  | 'Direct Labour'
-  | 'Packaging'
-  | 'Design'
-  | 'Production Transportation'
-  | 'Manufacturing Overhead'
-  | 'Other Production Cost'
+/** Suggested categories; custom strings are also allowed. */
+export type CostLineCategory = string
 
-export type CostLineMethod = 'qtyUnit' | 'fixedBatch' | 'bulkUsage'
+export type CostLineMethod =
+  | 'fixedBatch'
+  | 'bulkUsage'
+  | 'qtyUnit'
+  | 'labourHours'
+  | 'perFinishedUnit'
 
 export type CostLine = {
   id: string
@@ -15,13 +14,13 @@ export type CostLine = {
   category: CostLineCategory
   description: string
   method: CostLineMethod
-  /** Quantity × Unit Cost */
+  /** Quantity × Rate / Labour hours */
   quantity: string
   unit: string
   unitCost: string
-  /** Fixed Batch Cost */
+  /** Fixed Batch Amount */
   fixedTotal: string
-  /** Bulk Purchase Usage */
+  /** Bulk Material Consumption */
   bulkPurchaseQty: string
   bulkPurchaseUnit: string
   bulkPurchaseAmount: string
@@ -54,7 +53,7 @@ export type CostPricingPayload = {
   productId: string
   name: string
   category: string
-  /** Finished saleable quantity produced */
+  /** Finished units entered (saleable after finished wastage is deducted) */
   quantity: number
   unit: string
   calculationDate: string
@@ -62,7 +61,6 @@ export type CostPricingPayload = {
   lines: CostLine[]
   wastageMode: WastageMode
   wastagePct: string
-  /** Damaged / unsaleable finished units (absorbed into saleable unit cost) */
   finishedWastageQty: string
   contingencyPct: string
   additionalFixedCost: string
@@ -105,9 +103,8 @@ export type CostPricingTotals = {
   additionalFixedCost: number
   allocatedOverhead: number
   totalBatchCost: number
-  /** Finished saleable quantity used as divisor */
+  /** Saleable finished quantity used as divisor */
   quantity: number
-  /** Manufactured total when finished wastage mode is used */
   manufacturedQuantity: number
   finishedWastageQty: number
   costPerUnit: number
@@ -117,6 +114,8 @@ export type CostPricingTotals = {
   grossMarginPct: number
   totalExpectedSales: number
   totalExpectedGrossProfit: number
+  /** Expected batch net profit after selling costs */
+  totalExpectedNetProfit: number
   breakEvenQuantity: number
   sellingCostsPerUnit: number
   productGrossProfit: number

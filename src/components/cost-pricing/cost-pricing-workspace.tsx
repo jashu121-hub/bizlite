@@ -2,10 +2,10 @@
 
 import * as React from 'react'
 import {
-  Calculator,
-  Copy,
-  Eye,
+  ChevronDown,
   History,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Printer,
   Trash2,
@@ -33,6 +33,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -42,11 +49,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   autoScenarios,
   computeCostPricing,
+  computeLineDetail,
+  methodLabel,
   scenarioMetrics,
 } from '@/lib/cost-pricing/compute'
 import {
@@ -61,10 +69,8 @@ import type {
   CostLineMethod,
   CostPricingPayload,
   PricingMode,
-  WastageMode,
 } from '@/lib/cost-pricing/types'
 import { unitLabel } from '@/lib/cost-pricing/units'
-import { PRODUCT_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -118,11 +124,49 @@ function SummaryRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-zinc-500">{label}</span>
-      <span className={cn('font-medium tabular-nums', emphasize && 'text-base text-teal-800')}>
+      <span className={cn('text-zinc-500', emphasize && 'font-medium text-zinc-700')}>{label}</span>
+      <span
+        className={cn(
+          'tabular-nums text-zinc-800',
+          emphasize ? 'text-base font-semibold text-teal-800' : 'font-medium',
+        )}
+      >
         {value}
       </span>
     </div>
+  )
+}
+
+function CollapseSection({
+  title,
+  description,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string
+  description?: string
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Card>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-start justify-between gap-3 p-4 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold text-zinc-900">{title}</p>
+          {description ? <p className="mt-0.5 text-xs text-zinc-500">{description}</p> : null}
+        </div>
+        <ChevronDown
+          className={cn('mt-0.5 h-4 w-4 shrink-0 text-zinc-400 transition', open && 'rotate-180')}
+        />
+      </button>
+      {open ? <CardContent className="border-t border-zinc-100 pt-4">{children}</CardContent> : null}
+    </Card>
   )
 }
 
@@ -151,6 +195,13 @@ export function CostPricingWorkspace({
   const [saving, setSaving] = React.useState(false)
   const saveLock = React.useRef(false)
 
+  const [advancedOpen, setAdvancedOpen] = React.useState(false)
+  const [sellingCostsOpen, setSellingCostsOpen] = React.useState(false)
+  const [compareOpen, setCompareOpen] = React.useState(false)
+
+  const [editLine, setEditLine] = React.useState<CostLine | null>(null)
+  const [editOpen, setEditOpen] = React.useState(false)
+
   const [applyOpen, setApplyOpen] = React.useState(false)
   const [applyMode, setApplyMode] = React.useState<'cost' | 'price' | 'both'>('both')
   const [stockOpen, setStockOpen] = React.useState(false)
@@ -173,44 +224,10 @@ export function CostPricingWorkspace({
   })
 
   const totals = React.useMemo(() => computeCostPricing(payload), [payload])
-
-  React.useEffect(() => {
-    const auto = autoScenarios(totals.costPerUnit, totals.suggestedSellingPrice)
-    setPayload((prev) => {
-      const next = [...prev.scenarios]
-      const fill = (id: string, price: number) => {
-        const idx = next.findIndex((s) => s.id === id)
-        if (idx < 0) return
-        if (!next[idx].sellingPrice) {
-          next[idx] = { ...next[idx], sellingPrice: price ? String(price) : '' }
-        }
-      }
-      // Only auto-fill empty recommended when price changes
-      const rec = next.find((s) => s.id === 'recommended')
-      if (rec && (!rec.sellingPrice || Number(rec.sellingPrice) === 0)) {
-        fill('recommended', auto.recommended)
-      }
-      if (JSON.stringify(next) === JSON.stringify(prev.scenarios)) return prev
-      return { ...prev, scenarios: next }
-    })
-  }, [totals.costPerUnit, totals.suggestedSellingPrice])
+  const saleableQty = totals.quantity
 
   const update = <K extends keyof CostPricingPayload>(key: K, value: CostPricingPayload[K]) => {
     setPayload((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const updateLine = (id: string, patch: Partial<CostLine>) => {
-    setPayload((prev) => ({
-      ...prev,
-      lines: prev.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-    }))
-  }
-
-  const removeLine = (id: string) => {
-    setPayload((prev) => ({
-      ...prev,
-      lines: prev.lines.length <= 1 ? prev.lines : prev.lines.filter((l) => l.id !== id),
-    }))
   }
 
   const onProductChange = (productId: string) => {
@@ -223,6 +240,7 @@ export function CostPricingWorkspace({
       ...prev,
       productId,
       category: product?.category || prev.category,
+      unit: prev.unit || 'pcs',
       name: prev.name || (product ? `${product.name} cost` : prev.name),
     }))
   }
@@ -231,7 +249,44 @@ export function CostPricingWorkspace({
     setCalculationId(undefined)
     setPayload(createDefaultPayload())
     setShowHistory(false)
+    setEditOpen(false)
     toast.message('New calculation started')
+  }
+
+  const openAddLine = () => {
+    setEditLine(createEmptyCostLine('Materials', '', 'fixedBatch'))
+    setEditOpen(true)
+  }
+
+  const openEditLine = (line: CostLine) => {
+    setEditLine({ ...line })
+    setEditOpen(true)
+  }
+
+  const saveEditLine = () => {
+    if (!editLine) return
+    if (!editLine.name.trim()) {
+      toast.error('Enter a cost item name')
+      return
+    }
+    setPayload((prev) => {
+      const exists = prev.lines.some((l) => l.id === editLine.id)
+      return {
+        ...prev,
+        lines: exists
+          ? prev.lines.map((l) => (l.id === editLine.id ? editLine : l))
+          : [...prev.lines, editLine],
+      }
+    })
+    setEditOpen(false)
+    setEditLine(null)
+  }
+
+  const removeLine = (id: string) => {
+    setPayload((prev) => ({
+      ...prev,
+      lines: prev.lines.length <= 1 ? prev.lines : prev.lines.filter((l) => l.id !== id),
+    }))
   }
 
   const handleSave = async (status: 'DRAFT' | 'SAVED') => {
@@ -247,25 +302,20 @@ export function CostPricingWorkspace({
     saveLock.current = true
     setSaving(true)
     try {
-      const result = await saveCostCalculationAction({
-        id: calculationId,
-        status,
-        payload,
-      })
+      const result = await saveCostCalculationAction({ id: calculationId, status, payload })
       if (!result.success) {
         toast.error(result.error)
         return
       }
       setCalculationId(result.data.id)
       toast.success(result.message || 'Saved')
-      // Refresh history row locally
       setHistory((prev) => {
         const row: HistoryRow = {
           id: result.data.id,
           name: payload.name,
           productId: payload.productId || null,
           productName: products.find((p) => p.id === payload.productId)?.name ?? null,
-          quantity: payload.quantity,
+          quantity: saleableQty,
           unit: payload.unit,
           calculationDate: payload.calculationDate,
           status,
@@ -276,8 +326,7 @@ export function CostPricingWorkspace({
           expenseIds: prev.find((h) => h.id === result.data.id)?.expenseIds ?? [],
           updatedAt: new Date().toISOString(),
         }
-        const others = prev.filter((h) => h.id !== result.data.id)
-        return [row, ...others]
+        return [row, ...prev.filter((h) => h.id !== result.data.id)]
       })
     } finally {
       saveLock.current = false
@@ -329,7 +378,7 @@ export function CostPricingWorkspace({
   const openStock = () => {
     setStockForm({
       productId: payload.productId || '',
-      quantity: String(payload.quantity || ''),
+      quantity: String(saleableQty || ''),
       unitCost: String(totals.costPerUnit || ''),
       productionDate: payload.calculationDate,
       batchReference: payload.name,
@@ -344,18 +393,16 @@ export function CostPricingWorkspace({
       toast.error('Save the calculation before creating expenses')
       return
     }
-    const hist = history.find((h) => h.id === calculationId)
-    if (hist?.expenseIds?.length) {
+    if (history.find((h) => h.id === calculationId)?.expenseIds?.length) {
       toast.error('Production expenses were already created for this calculation')
       return
     }
-    const productionCat =
-      expenseCategories.find((c) => c.defaultCostType === 'PRODUCTION')?.id ||
-      expenseCategories[0]?.id ||
-      ''
     setExpenseForm({
       expenseDate: payload.calculationDate,
-      categoryId: productionCat,
+      categoryId:
+        expenseCategories.find((c) => c.defaultCostType === 'PRODUCTION')?.id ||
+        expenseCategories[0]?.id ||
+        '',
       cashAccountId: '',
       paymentMethod: 'CASH',
       lineIds: payload.lines.filter((l) => l.includeInUnitCost).map((l) => l.id),
@@ -370,10 +417,7 @@ export function CostPricingWorkspace({
       { id: 'recommended', label: 'Recommended', sellingPrice: String(auto.recommended) },
       { id: 'premium', label: 'Premium Price', sellingPrice: String(auto.premium) },
     ])
-  }
-
-  const handlePrint = () => {
-    window.print()
+    setCompareOpen(true)
   }
 
   const expensePreviewTotal = expenseForm.lineIds.reduce((sum, id) => {
@@ -381,63 +425,67 @@ export function CostPricingWorkspace({
     return sum + (line?.total ?? 0)
   }, 0)
 
+  const editDetail = editLine ? computeLineDetail(editLine, saleableQty) : null
+
   return (
-    <div className="space-y-6 pb-28 lg:pb-6">
-      <div className="flex flex-wrap items-center gap-2 print:hidden">
-        <Button type="button" onClick={resetNew}>
-          <Plus className="h-4 w-4" />
-          New Calculation
-        </Button>
-        <Button type="button" variant="outline" onClick={() => setShowHistory((v) => !v)}>
-          <History className="h-4 w-4" />
-          Saved Calculations
-        </Button>
+    <div className="space-y-4 pb-32 lg:pb-8">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between print:hidden">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+            Product Cost & Pricing Calculator
+          </h1>
+          <p className="text-sm text-zinc-500">
+            Work out batch cost, cost per finished unit, and a sensible selling price.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={resetNew}>
+            <Plus className="h-4 w-4" />
+            New Calculation
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setShowHistory((v) => !v)}>
+            <History className="h-4 w-4" />
+            Saved Calculations
+          </Button>
+        </div>
       </div>
 
       {showHistory ? (
         <Card>
-          <CardHeader>
-            <CardTitle>Saved Calculations</CardTitle>
-            <CardDescription>Historical calculation versions for this business.</CardDescription>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Saved Calculations</CardTitle>
+            <CardDescription>Open, duplicate, apply or delete previous versions.</CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             {history.length === 0 ? (
               <p className="text-sm text-zinc-500">No saved calculations yet.</p>
             ) : (
-              <table className="w-full min-w-[800px] text-left text-sm">
+              <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="border-b text-zinc-500">
                   <tr>
-                    <th className="py-2 pr-3 font-medium">Date</th>
-                    <th className="py-2 pr-3 font-medium">Name</th>
-                    <th className="py-2 pr-3 font-medium">Product</th>
-                    <th className="py-2 pr-3 font-medium">Qty</th>
-                    <th className="py-2 pr-3 font-medium">Batch cost</th>
-                    <th className="py-2 pr-3 font-medium">Unit cost</th>
-                    <th className="py-2 pr-3 font-medium">Sell price</th>
-                    <th className="py-2 pr-3 font-medium">Margin</th>
-                    <th className="py-2 pr-3 font-medium">Status</th>
+                    <th className="py-2 pr-2 font-medium">Date</th>
+                    <th className="py-2 pr-2 font-medium">Name</th>
+                    <th className="py-2 pr-2 font-medium">Product</th>
+                    <th className="py-2 pr-2 font-medium">Qty</th>
+                    <th className="py-2 pr-2 font-medium">Unit cost</th>
+                    <th className="py-2 pr-2 font-medium">Sell</th>
                     <th className="py-2 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((row) => (
                     <tr key={row.id} className="border-b border-zinc-100">
-                      <td className="py-2 pr-3">{row.calculationDate}</td>
-                      <td className="py-2 pr-3">{row.name}</td>
-                      <td className="py-2 pr-3">{row.productName || '—'}</td>
-                      <td className="py-2 pr-3">{row.quantity}</td>
-                      <td className="py-2 pr-3 tabular-nums">{money(row.totalBatchCost)}</td>
-                      <td className="py-2 pr-3 tabular-nums">{money(row.costPerUnit)}</td>
-                      <td className="py-2 pr-3 tabular-nums">{money(row.suggestedSellingPrice)}</td>
-                      <td className="py-2 pr-3 tabular-nums">{Number(row.grossMarginPct).toFixed(2)}%</td>
-                      <td className="py-2 pr-3">{row.status}</td>
+                      <td className="py-2 pr-2">{row.calculationDate}</td>
+                      <td className="py-2 pr-2">{row.name}</td>
+                      <td className="py-2 pr-2">{row.productName || '—'}</td>
+                      <td className="py-2 pr-2">{row.quantity}</td>
+                      <td className="py-2 pr-2 tabular-nums">{money(row.costPerUnit)}</td>
+                      <td className="py-2 pr-2 tabular-nums">{money(row.suggestedSellingPrice)}</td>
                       <td className="py-2">
                         <div className="flex flex-wrap gap-1">
                           <Button size="sm" variant="ghost" onClick={() => void loadCalculation(row.id)}>
-                            <Eye className="h-3.5 w-3.5" /> View
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => void loadCalculation(row.id)}>
-                            Edit
+                            Open
                           </Button>
                           <Button
                             size="sm"
@@ -451,17 +499,7 @@ export function CostPricingWorkspace({
                               }
                             }}
                           >
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={async () => {
-                              await loadCalculation(row.id)
-                              openApply('both')
-                            }}
-                          >
-                            Apply
+                            Copy
                           </Button>
                           <Button
                             size="sm"
@@ -490,24 +528,26 @@ export function CostPricingWorkspace({
         </Card>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,65fr)_minmax(280px,35fr)]">
+        {/* Left column */}
+        <div className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Product information</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Product & batch</CardTitle>
               <CardDescription>
-                Select an existing product or calculate without linking a product.
+                Finished quantity means good, saleable units only (after any finished wastage in
+                Advanced).
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label>Product</Label>
                 <Select value={payload.productId || '__none__'} onValueChange={onProductChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select product (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">No product (standalone calculation)</SelectItem>
+                    <SelectItem value="__none__">No product (standalone)</SelectItem>
                     {products.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name}
@@ -515,8 +555,13 @@ export function CostPricingWorkspace({
                     ))}
                   </SelectContent>
                 </Select>
+                {payload.productId ? (
+                  <p className="text-xs text-zinc-500">
+                    Category: {payload.category || '—'} · loaded from product
+                  </p>
+                ) : null}
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="calc-name">Calculation name</Label>
                 <Input
                   id="calc-name"
@@ -525,26 +570,17 @@ export function CostPricingWorkspace({
                   placeholder="e.g. T-Shirt batch July"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Product category</Label>
-                <Select
-                  value={payload.category || undefined}
-                  onValueChange={(v) => update('category', v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRODUCT_CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-1.5">
+                <Label htmlFor="calc-date">Calculation date</Label>
+                <Input
+                  id="calc-date"
+                  type="date"
+                  value={payload.calculationDate}
+                  onChange={(e) => update('calculationDate', e.target.value)}
+                />
               </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="qty">Finished quantity produced</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="qty">Finished saleable quantity</Label>
                 <Input
                   id="qty"
                   type="number"
@@ -554,17 +590,18 @@ export function CostPricingWorkspace({
                     update('quantity', Math.max(0, Math.floor(Number(e.target.value) || 0)))
                   }
                 />
-                <p className="text-xs text-zinc-500">
-                  Enter the total number of finished saleable units produced from this calculation.
-                  Example: if the batch produces 15 T-shirts, enter 15.
-                </p>
-                <p className="text-xs text-amber-700/90">
-                  Enter the actual number of good, saleable units produced. Damaged or wasted units
-                  should not normally be included.
-                </p>
+                {Number(payload.finishedWastageQty) > 0 ? (
+                  <p className="text-xs text-amber-700">
+                    After finished wastage: {saleableQty} saleable of {payload.quantity} produced
+                  </p>
+                ) : (
+                  <p className="text-xs text-zinc-500">
+                    Good, saleable finished units from this batch.
+                  </p>
+                )}
               </div>
-              <div className="space-y-2">
-                <Label>Unit of measurement</Label>
+              <div className="space-y-1.5">
+                <Label>Unit</Label>
                 <Select value={payload.unit} onValueChange={(v) => update('unit', v)}>
                   <SelectTrigger>
                     <SelectValue />
@@ -578,16 +615,7 @@ export function CostPricingWorkspace({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="calc-date">Calculation date</Label>
-                <Input
-                  id="calc-date"
-                  type="date"
-                  value={payload.calculationDate}
-                  onChange={(e) => update('calculationDate', e.target.value)}
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="notes">Notes</Label>
                 <Textarea
                   id="notes"
@@ -600,354 +628,149 @@ export function CostPricingWorkspace({
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
               <div>
-                <CardTitle>Cost components</CardTitle>
-                <CardDescription>
-                  Choose how each line is calculated. Only cost consumed by this batch is included —
-                  unused bulk purchase value is excluded.
-                </CardDescription>
+                <CardTitle className="text-base">Production costs</CardTitle>
+                <CardDescription>Compact table — edit a row to set the calculation method.</CardDescription>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setPayload((prev) => ({
-                    ...prev,
-                    lines: [
-                      ...prev.lines,
-                      createEmptyCostLine('Other Production Cost', '', 'fixedBatch'),
-                    ],
-                  }))
-                }
-              >
-                <Plus className="h-4 w-4" /> Add line
+              <Button type="button" size="sm" onClick={openAddLine}>
+                <Plus className="h-4 w-4" /> Add Cost
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {payload.lines.map((line) => {
-                const detail = totals.lineTotals.find((t) => t.id === line.id)
-                const total = detail?.total ?? 0
-                const method = line.method || 'fixedBatch'
-                return (
-                  <div
-                    key={line.id}
-                    className="space-y-3 rounded-lg border border-zinc-100 p-3"
-                  >
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Cost component</Label>
-                        <Input
-                          value={line.name}
-                          onChange={(e) => updateLine(line.id, { name: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Category</Label>
-                        <Select
-                          value={line.category}
-                          onValueChange={(v) =>
-                            updateLine(line.id, { category: v as CostLine['category'] })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {COST_CATEGORIES.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Calculation method</Label>
-                        <Select
-                          value={method}
-                          onValueChange={(v) =>
-                            updateLine(line.id, { method: v as CostLineMethod })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {COST_LINE_METHODS.map((m) => (
-                              <SelectItem key={m.value} value={m.value}>
-                                {m.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Description</Label>
-                        <Input
-                          value={line.description}
-                          onChange={(e) => updateLine(line.id, { description: e.target.value })}
-                        />
-                      </div>
-                    </div>
+            <CardContent className="p-0">
+              {/* Desktop table */}
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full text-sm">
+                  <thead className="border-y bg-zinc-50/80 text-left text-xs text-zinc-500">
+                    <tr>
+                      <th className="px-4 py-2.5 font-medium">Cost Item</th>
+                      <th className="px-2 py-2.5 font-medium">Category</th>
+                      <th className="px-2 py-2.5 font-medium">Method</th>
+                      <th className="px-2 py-2.5 text-right font-medium">Batch Cost</th>
+                      <th className="px-2 py-2.5 text-right font-medium">Per Unit</th>
+                      <th className="px-4 py-2.5 text-right font-medium"> </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payload.lines.map((line) => {
+                      const batch = totals.lineTotals.find((t) => t.id === line.id)?.total ?? 0
+                      const perUnit = saleableQty > 0 ? batch / saleableQty : 0
+                      return (
+                        <tr key={line.id} className="border-b border-zinc-100">
+                          <td className="px-4 py-2.5 font-medium text-zinc-900">{line.name}</td>
+                          <td className="px-2 py-2.5 text-zinc-600">{line.category}</td>
+                          <td className="px-2 py-2.5 text-zinc-500">{methodLabel(line.method)}</td>
+                          <td className="px-2 py-2.5 text-right tabular-nums">{money(batch)}</td>
+                          <td className="px-2 py-2.5 text-right tabular-nums text-zinc-600">
+                            {money(perUnit)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => openEditLine(line)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-red-600"
+                              onClick={() => removeLine(line.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-                    {method === 'qtyUnit' ? (
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Quantity used</Label>
-                          <Input
-                            value={line.quantity}
-                            onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Unit</Label>
-                          <Select
-                            value={line.unit || 'pcs'}
-                            onValueChange={(v) => updateLine(line.id, { unit: v })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {UNIT_OPTIONS.map((u) => (
-                                <SelectItem key={u.value} value={u.value}>
-                                  {u.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Cost per unit</Label>
-                          <CurrencyInput
-                            currency={currency}
-                            value={line.unitCost}
-                            onChange={(v) => updateLine(line.id, { unitCost: v })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Line cost</Label>
-                          <p className="flex h-10 items-center text-sm font-medium tabular-nums">
-                            {money(total)}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {method === 'fixedBatch' ? (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Total cost used for this batch</Label>
-                          <CurrencyInput
-                            currency={currency}
-                            value={line.fixedTotal}
-                            onChange={(v) => updateLine(line.id, { fixedTotal: v })}
-                          />
+              {/* Mobile compact cards */}
+              <div className="space-y-2 p-3 md:hidden">
+                {payload.lines.map((line) => {
+                  const batch = totals.lineTotals.find((t) => t.id === line.id)?.total ?? 0
+                  const perUnit = saleableQty > 0 ? batch / saleableQty : 0
+                  return (
+                    <div key={line.id} className="rounded-lg border border-zinc-100 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-medium text-zinc-900">{line.name}</p>
                           <p className="text-xs text-zinc-500">
-                            Not divided here — included in Total Batch Cost, then ÷ finished
-                            quantity.
+                            {line.category} · {methodLabel(line.method)}
                           </p>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Line cost</Label>
-                          <p className="flex h-10 items-center text-sm font-medium tabular-nums">
-                            {money(total)}
-                          </p>
+                        <div className="flex gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => openEditLine(line)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-red-600"
+                            onClick={() => removeLine(line.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
-                    ) : null}
-
-                    {method === 'bulkUsage' ? (
-                      <div className="space-y-3">
-                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Bulk purchase quantity</Label>
-                            <Input
-                              value={line.bulkPurchaseQty}
-                              onChange={(e) =>
-                                updateLine(line.id, { bulkPurchaseQty: e.target.value })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Purchase unit</Label>
-                            <Select
-                              value={line.bulkPurchaseUnit || 'm'}
-                              onValueChange={(v) => updateLine(line.id, { bulkPurchaseUnit: v })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {UNIT_OPTIONS.map((u) => (
-                                  <SelectItem key={u.value} value={u.value}>
-                                    {u.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Total bulk purchase amount</Label>
-                            <CurrencyInput
-                              currency={currency}
-                              value={line.bulkPurchaseAmount}
-                              onChange={(v) => updateLine(line.id, { bulkPurchaseAmount: v })}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Quantity used for this batch</Label>
-                            <Input
-                              value={line.quantityUsed}
-                              onChange={(e) =>
-                                updateLine(line.id, { quantityUsed: e.target.value })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Usage unit</Label>
-                            <Select
-                              value={line.usageUnit || line.bulkPurchaseUnit || 'm'}
-                              onValueChange={(v) => updateLine(line.id, { usageUnit: v })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {UNIT_OPTIONS.map((u) => (
-                                  <SelectItem key={u.value} value={u.value}>
-                                    {u.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Calculated cost used</Label>
-                            <p className="flex h-10 items-center text-sm font-semibold tabular-nums text-teal-800">
-                              {money(total)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="grid gap-2 rounded-md bg-zinc-50 p-3 text-xs text-zinc-600 sm:grid-cols-2 lg:grid-cols-5">
-                          <div>
-                            <p className="text-zinc-400">Purchase unit cost</p>
-                            <p className="font-medium tabular-nums text-zinc-800">
-                              {money(detail?.bulkUnitCost ?? 0)}/
-                              {unitLabel(line.usageUnit || line.bulkPurchaseUnit || 'm')}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-zinc-400">Quantity consumed</p>
-                            <p className="font-medium tabular-nums text-zinc-800">
-                              {detail?.quantityConsumed ?? 0}{' '}
-                              {unitLabel(line.usageUnit || 'm')}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-zinc-400">Batch cost</p>
-                            <p className="font-medium tabular-nums text-zinc-800">{money(total)}</p>
-                          </div>
-                          <div>
-                            <p className="text-zinc-400">Remaining quantity</p>
-                            <p className="font-medium tabular-nums text-zinc-800">
-                              {detail?.remainingQty ?? 0} {unitLabel(line.usageUnit || 'm')}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-zinc-400">Remaining value</p>
-                            <p className="font-medium tabular-nums text-zinc-800">
-                              {money(detail?.remainingValue ?? 0)}
-                            </p>
-                          </div>
-                          {detail?.conversionError || detail?.usageExceedsPurchase ? (
-                            <p className="text-amber-700 sm:col-span-2 lg:col-span-5">
-                              {detail.conversionError ||
-                                'Quantity used cannot exceed available bulk quantity.'}
-                            </p>
-                          ) : null}
-                        </div>
+                      <div className="mt-2 flex justify-between text-sm">
+                        <span className="text-zinc-500">Batch</span>
+                        <span className="tabular-nums font-medium">{money(batch)}</span>
                       </div>
-                    ) : null}
-
-                    <div className="flex items-center justify-between gap-3 border-t border-zinc-100 pt-2">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={line.includeInUnitCost}
-                          onCheckedChange={(v) => updateLine(line.id, { includeInUnitCost: v })}
-                        />
-                        <span className="text-xs text-zinc-600">Include in unit cost</span>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-500">Per unit</span>
+                        <span className="tabular-nums">{money(perUnit)}</span>
                       </div>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="text-red-600"
-                        onClick={() => removeLine(line.id)}
-                        aria-label="Delete line"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Wastage and extra cost</CardTitle>
-              <CardDescription>
-                Material wastage adds cost. Finished-product wastage reduces saleable quantity so
-                damaged units are absorbed by good units.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <Label>Wastage method</Label>
-                <Select
-                  value={payload.wastageMode || 'materialPct'}
-                  onValueChange={(v) => update('wastageMode', v as WastageMode)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="materialPct">Material wastage percentage</SelectItem>
-                    <SelectItem value="finishedQty">Finished-product wastage quantity</SelectItem>
-                  </SelectContent>
-                </Select>
+          <CollapseSection
+            title="Advanced Production Costs"
+            description="Wastage, contingency, additional cost and overhead — optional."
+            open={advancedOpen}
+            onToggle={() => setAdvancedOpen((v) => !v)}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Material wastage %</Label>
+                <Input
+                  value={payload.wastagePct}
+                  onChange={(e) => update('wastagePct', pct(e.target.value))}
+                  placeholder="0"
+                />
+                <p className="text-[11px] text-zinc-500">Increases material cost only.</p>
               </div>
-              {(payload.wastageMode || 'materialPct') === 'materialPct' ? (
-                <div className="space-y-2">
-                  <Label>Material wastage %</Label>
-                  <Input
-                    value={payload.wastagePct}
-                    onChange={(e) => update('wastagePct', pct(e.target.value))}
-                    placeholder="0"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label>Damaged / unsaleable finished units</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={payload.finishedWastageQty}
-                    onChange={(e) => update('finishedWastageQty', e.target.value)}
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-zinc-500">
-                    Unit cost = Total Batch Cost ÷ finished saleable quantity (
-                    {totals.quantity}). Manufactured total shown as{' '}
-                    {totals.manufacturedQuantity} (saleable + damaged).
-                  </p>
-                </div>
-              )}
-              <div className="space-y-2">
+              <div className="space-y-1.5">
+                <Label>Finished-product wastage (units)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={payload.finishedWastageQty}
+                  onChange={(e) => update('finishedWastageQty', e.target.value)}
+                  placeholder="0"
+                />
+                <p className="text-[11px] text-zinc-500">
+                  Deducted from finished quantity so damaged units are absorbed by saleable ones.
+                </p>
+              </div>
+              <div className="space-y-1.5">
                 <Label>Contingency %</Label>
                 <Input
                   value={payload.contingencyPct}
@@ -955,7 +778,7 @@ export function CostPricingWorkspace({
                   placeholder="0"
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5">
                 <Label>Additional fixed production cost</Label>
                 <CurrencyInput
                   currency={currency}
@@ -963,28 +786,16 @@ export function CostPricingWorkspace({
                   onChange={(v) => update('additionalFixedCost', v)}
                 />
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Overhead allocation</CardTitle>
-              <CardDescription>
-                Optional. Only amounts you enter here are included — business overhead is not
-                auto-imported.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2 sm:col-span-3">
-                <Label>Label (e.g. Rent, Electricity)</Label>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>Overhead label (optional)</Label>
                 <Input
                   value={payload.overheadLabel}
                   onChange={(e) => update('overheadLabel', e.target.value)}
-                  placeholder="Rent / Electricity / Admin salary…"
+                  placeholder="Rent, electricity, admin…"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Method</Label>
+              <div className="space-y-1.5">
+                <Label>Overhead method</Label>
                 <Select
                   value={payload.overheadMethod}
                   onValueChange={(v) =>
@@ -996,14 +807,14 @@ export function CostPricingWorkspace({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="fixed">Fixed amount</SelectItem>
-                    <SelectItem value="perUnit">Amount per unit</SelectItem>
-                    <SelectItem value="percent">Percentage of production cost</SelectItem>
+                    <SelectItem value="perUnit">Amount per finished unit</SelectItem>
+                    <SelectItem value="percent">% of direct production cost</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5">
                 <Label>
-                  {payload.overheadMethod === 'percent' ? 'Percentage' : 'Amount'}
+                  {payload.overheadMethod === 'percent' ? 'Overhead %' : 'Overhead amount'}
                 </Label>
                 {payload.overheadMethod === 'percent' ? (
                   <Input
@@ -1018,95 +829,22 @@ export function CostPricingWorkspace({
                   />
                 )}
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6 lg:sticky lg:top-4 lg:self-start">
-          <Card className="border-teal-100 bg-teal-50/40">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calculator className="h-5 w-5 text-teal-700" />
-                Cost summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <SummaryRow label="Materials Cost" value={money(totals.materialsCost)} />
-              <SummaryRow label="Direct Labour" value={money(totals.directLabourCost)} />
-              <SummaryRow label="Packaging" value={money(totals.packagingCost)} />
-              <SummaryRow label="Transportation" value={money(totals.transportationCost)} />
-              <SummaryRow label="Other Direct Cost" value={money(totals.otherDirectCost)} />
-              <SummaryRow label="Wastage Cost" value={money(totals.wastageCost)} />
-              <SummaryRow label="Contingency Cost" value={money(totals.contingencyCost)} />
-              <SummaryRow label="Allocated Overhead" value={money(totals.allocatedOverhead)} />
-              <div className="my-2 border-t border-teal-100" />
-              <SummaryRow label="Total Batch Cost" value={money(totals.totalBatchCost)} emphasize />
-              <SummaryRow
-                label="Finished Quantity Produced"
-                value={`${totals.quantity} ${unitLabel(payload.unit)}`}
-              />
-              <SummaryRow
-                label="Cost Per Finished Unit"
-                value={money(totals.costPerUnit)}
-                emphasize
-              />
-              <p className="pt-1 text-[11px] text-zinc-500">
-                Cost Per Finished Unit = Total Batch Cost ÷ Finished Quantity Produced
+              <p className="text-xs text-zinc-500 sm:col-span-2">
+                Overhead is optional. Only amounts you enter here are included — BizLite does not
+                import all business overhead automatically.
               </p>
-              {!totals.validation.ok ? (
-                <p className="pt-2 text-xs text-amber-700">{totals.validation.messages[0]}</p>
-              ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </CollapseSection>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Batch cost summary</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Selling price</CardTitle>
               <CardDescription>
-                Separates bulk purchase value from cost actually consumed in this batch.
+                Markup uses cost × (1 + %). Margin uses cost ÷ (1 − %). They are not the same.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <SummaryRow label="Bulk purchase value" value={money(totals.bulkPurchaseValue)} />
-              <SummaryRow
-                label="Cost consumed in this batch"
-                value={money(totals.costConsumedInBatch)}
-              />
-              <SummaryRow
-                label="Unused material value"
-                value={money(totals.unusedMaterialValue)}
-              />
-              <SummaryRow label="Direct labour" value={money(totals.directLabourCost)} />
-              <SummaryRow label="Packaging" value={money(totals.packagingCost)} />
-              <SummaryRow label="Transportation" value={money(totals.transportationCost)} />
-              <SummaryRow
-                label="Other production costs"
-                value={money(totals.otherDirectCost)}
-              />
-              <div className="my-2 border-t border-zinc-100" />
-              <SummaryRow label="Total batch cost" value={money(totals.totalBatchCost)} emphasize />
-              <SummaryRow
-                label="Finished quantity produced"
-                value={`${totals.quantity} ${unitLabel(payload.unit)}`}
-              />
-              <SummaryRow
-                label="Cost per finished unit"
-                value={money(totals.costPerUnit)}
-                emphasize
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Selling price calculator</CardTitle>
-              <CardDescription>
-                Markup and margin are different. Markup uses cost × (1 + %). Margin uses cost ÷
-                (1 − %).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label>Pricing method</Label>
                 <Select
                   value={payload.pricingMode}
@@ -1123,8 +861,8 @@ export function CostPricingWorkspace({
                 </Select>
               </div>
               {payload.pricingMode === 'markup' ? (
-                <div className="space-y-2">
-                  <Label>Target markup %</Label>
+                <div className="space-y-1.5">
+                  <Label>Markup %</Label>
                   <Input
                     value={payload.targetMarkupPct}
                     onChange={(e) => update('targetMarkupPct', pct(e.target.value))}
@@ -1132,8 +870,8 @@ export function CostPricingWorkspace({
                 </div>
               ) : null}
               {payload.pricingMode === 'margin' ? (
-                <div className="space-y-2">
-                  <Label>Target gross margin % (must be below 100)</Label>
+                <div className="space-y-1.5">
+                  <Label>Gross margin % (below 100)</Label>
                   <Input
                     value={payload.targetMarginPct}
                     onChange={(e) => update('targetMarginPct', pct(e.target.value))}
@@ -1141,8 +879,8 @@ export function CostPricingWorkspace({
                 </div>
               ) : null}
               {payload.pricingMode === 'manual' ? (
-                <div className="space-y-2">
-                  <Label>Manual selling price</Label>
+                <div className="space-y-1.5">
+                  <Label>Selling price</Label>
                   <CurrencyInput
                     currency={currency}
                     value={payload.manualSellingPrice}
@@ -1153,38 +891,14 @@ export function CostPricingWorkspace({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Pricing results</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <SummaryRow label="Cost Per Unit" value={money(totals.costPerUnit)} />
-              <SummaryRow
-                label="Suggested Selling Price"
-                value={money(totals.suggestedSellingPrice)}
-                emphasize
-              />
-              <SummaryRow label="Profit Per Unit" value={money(totals.profitPerUnit)} />
-              <SummaryRow label="Markup %" value={`${totals.markupPct.toFixed(2)}%`} />
-              <SummaryRow label="Gross Margin %" value={`${totals.grossMarginPct.toFixed(2)}%`} />
-              <SummaryRow label="Total Expected Sales" value={money(totals.totalExpectedSales)} />
-              <SummaryRow
-                label="Total Expected Gross Profit"
-                value={money(totals.totalExpectedGrossProfit)}
-              />
-              <SummaryRow label="Break-even Quantity" value={String(totals.breakEvenQuantity)} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Optional selling costs</CardTitle>
-              <CardDescription>
-                Shown separately — not included in production cost or COGS.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
+          <CollapseSection
+            title="Add Selling Costs"
+            description="Optional. Not included in production cost or COGS."
+            open={sellingCostsOpen}
+            onToggle={() => setSellingCostsOpen((v) => !v)}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
                 <Label>Customer delivery / unit</Label>
                 <CurrencyInput
                   currency={currency}
@@ -1194,7 +908,7 @@ export function CostPricingWorkspace({
                   }
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label>Sales commission %</Label>
                 <Input
                   value={payload.sellingCosts.commissionPct}
@@ -1206,7 +920,7 @@ export function CostPricingWorkspace({
                   }
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label>Marketplace fee %</Label>
                 <Input
                   value={payload.sellingCosts.marketplaceFeePct}
@@ -1218,7 +932,7 @@ export function CostPricingWorkspace({
                   }
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label>Card payment fee %</Label>
                 <Input
                   value={payload.sellingCosts.cardFeePct}
@@ -1230,7 +944,7 @@ export function CostPricingWorkspace({
                   }
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label>Other selling cost / unit</Label>
                 <CurrencyInput
                   currency={currency}
@@ -1240,138 +954,216 @@ export function CostPricingWorkspace({
                   }
                 />
               </div>
-              <div className="sm:col-span-2 space-y-2 rounded-lg bg-zinc-50 p-3">
-                <SummaryRow
-                  label="Product Gross Profit"
-                  value={money(totals.productGrossProfit)}
-                />
-                <SummaryRow
-                  label="Selling costs / unit"
-                  value={money(totals.sellingCostsPerUnit)}
-                />
-                <SummaryRow
-                  label="Profit After Selling Costs"
-                  value={money(totals.profitAfterSellingCosts)}
-                  emphasize
-                />
+            </div>
+          </CollapseSection>
+
+          {!compareOpen ? (
+            <Button type="button" variant="outline" className="w-full" onClick={generateScenarios}>
+              Compare Prices
+            </Button>
+          ) : (
+            <CollapseSection
+              title="Price scenarios"
+              description="Low / Recommended / Premium"
+              open={compareOpen}
+              onToggle={() => setCompareOpen((v) => !v)}
+            >
+              <div className="mb-3 flex justify-end">
+                <Button type="button" size="sm" variant="outline" onClick={generateScenarios}>
+                  Regenerate
+                </Button>
               </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b text-xs text-zinc-500">
+                    <tr>
+                      <th className="py-2 pr-2 text-left font-medium">Scenario</th>
+                      <th className="py-2 pr-2 text-left font-medium">Price</th>
+                      <th className="py-2 pr-2 text-right font-medium">Profit</th>
+                      <th className="py-2 pr-2 text-right font-medium">Markup</th>
+                      <th className="py-2 text-right font-medium">Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payload.scenarios.map((scenario, index) => {
+                      const m = scenarioMetrics(
+                        totals.costPerUnit,
+                        Number(scenario.sellingPrice) || 0,
+                      )
+                      return (
+                        <tr key={scenario.id} className="border-b border-zinc-100">
+                          <td className="py-2 pr-2">{scenario.label}</td>
+                          <td className="py-2 pr-2">
+                            <CurrencyInput
+                              currency={currency}
+                              value={scenario.sellingPrice}
+                              onChange={(v) => {
+                                const next = [...payload.scenarios]
+                                next[index] = { ...scenario, sellingPrice: v }
+                                update('scenarios', next)
+                              }}
+                            />
+                          </td>
+                          <td className="py-2 pr-2 text-right tabular-nums">
+                            {money(m.profitPerUnit)}
+                          </td>
+                          <td className="py-2 pr-2 text-right tabular-nums">
+                            {m.markupPct.toFixed(1)}%
+                          </td>
+                          <td className="py-2 text-right tabular-nums">{m.marginPct.toFixed(1)}%</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CollapseSection>
+          )}
+
+          {/* Primary actions */}
+          <Card className="print:hidden">
+            <CardContent className="flex flex-wrap gap-2 pt-6">
+              <Button type="button" disabled={saving} onClick={() => void handleSave('SAVED')}>
+                Save Calculation
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => openApply('both')}>
+                Apply Cost & Price to Product
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline">
+                    <MoreHorizontal className="h-4 w-4" />
+                    More Actions
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuItem disabled={saving} onClick={() => void handleSave('DRAFT')}>
+                    Save as Draft
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openApply('cost')}>
+                    Apply Cost Only
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openApply('price')}>
+                    Apply Selling Price Only
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={openExpense}>Create Production Expense</DropdownMenuItem>
+                  <DropdownMenuItem onClick={openStock}>Add Produced Stock</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => window.print()}>
+                    <Printer className="h-4 w-4" />
+                    Print / Export
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardContent>
+            <p className="px-6 pb-4 text-xs text-zinc-500">
+              Applying updates the product for future sales only. Historical sales, COGS and past
+              profitability are never changed.
+            </p>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-2">
-              <div>
-                <CardTitle>Price comparison</CardTitle>
-                <CardDescription>Low / Recommended / Premium scenarios.</CardDescription>
-              </div>
-              <Button type="button" size="sm" variant="outline" onClick={generateScenarios}>
-                Generate
-              </Button>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b text-zinc-500">
-                  <tr>
-                    <th className="py-2 pr-2 text-left font-medium">Scenario</th>
-                    <th className="py-2 pr-2 text-left font-medium">Selling Price</th>
-                    <th className="py-2 pr-2 text-right font-medium">Profit / unit</th>
-                    <th className="py-2 pr-2 text-right font-medium">Markup</th>
-                    <th className="py-2 text-right font-medium">Margin</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payload.scenarios.map((scenario, index) => {
-                    const m = scenarioMetrics(totals.costPerUnit, Number(scenario.sellingPrice) || 0)
-                    return (
-                      <tr key={scenario.id} className="border-b border-zinc-100">
-                        <td className="py-2 pr-2">{scenario.label}</td>
-                        <td className="py-2 pr-2">
-                          <CurrencyInput
-                            currency={currency}
-                            value={scenario.sellingPrice}
-                            onChange={(v) => {
-                              const next = [...payload.scenarios]
-                              next[index] = { ...scenario, sellingPrice: v }
-                              update('scenarios', next)
-                            }}
-                          />
-                        </td>
-                        <td className="py-2 pr-2 text-right tabular-nums">{money(m.profitPerUnit)}</td>
-                        <td className="py-2 pr-2 text-right tabular-nums">{m.markupPct.toFixed(1)}%</td>
-                        <td className="py-2 text-right tabular-nums">{m.marginPct.toFixed(1)}%</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
+          <p className="text-xs text-zinc-500">
+            Product Cost is the cost to make one unit. Production Expense is a cash/expense entry.
+            COGS is the sale-time cost of units sold. These can differ and are not the same value.
+          </p>
         </div>
+
+        {/* Sticky summary */}
+        <aside className="hidden lg:block">
+          <div className="sticky top-4 space-y-3">
+            <Card className="border-teal-100 bg-gradient-to-b from-teal-50/60 to-white shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Results</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    Production
+                  </p>
+                  <SummaryRow label="Materials" value={money(totals.materialsCost)} />
+                  <SummaryRow label="Direct Labour" value={money(totals.directLabourCost)} />
+                  <SummaryRow label="Packaging" value={money(totals.packagingCost)} />
+                  <SummaryRow label="Transportation" value={money(totals.transportationCost)} />
+                  <SummaryRow label="Other Production Costs" value={money(totals.otherDirectCost)} />
+                  <SummaryRow
+                    label="Wastage"
+                    value={money(totals.wastageCost + totals.contingencyCost)}
+                  />
+                  <SummaryRow label="Overhead" value={money(totals.allocatedOverhead)} />
+                  <div className="border-t border-teal-100 pt-2">
+                    <SummaryRow
+                      label="Total Batch Cost"
+                      value={money(totals.totalBatchCost)}
+                      emphasize
+                    />
+                    <SummaryRow
+                      label="Finished Saleable Qty"
+                      value={`${saleableQty} ${unitLabel(payload.unit)}`}
+                    />
+                    <SummaryRow
+                      label="Cost Per Finished Unit"
+                      value={money(totals.costPerUnit)}
+                      emphasize
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5 border-t border-teal-100 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    Pricing
+                  </p>
+                  <SummaryRow
+                    label="Suggested Selling Price"
+                    value={money(totals.suggestedSellingPrice)}
+                    emphasize
+                  />
+                  <SummaryRow
+                    label="Gross Profit Per Unit"
+                    value={money(totals.productGrossProfit)}
+                  />
+                  <SummaryRow
+                    label="Selling Costs Per Unit"
+                    value={money(totals.sellingCostsPerUnit)}
+                  />
+                  <SummaryRow
+                    label="Net Profit Per Unit"
+                    value={money(totals.profitAfterSellingCosts)}
+                    emphasize
+                  />
+                  <SummaryRow label="Markup %" value={`${totals.markupPct.toFixed(2)}%`} />
+                  <SummaryRow label="Gross Margin %" value={`${totals.grossMarginPct.toFixed(2)}%`} />
+                  <SummaryRow
+                    label="Expected Batch Revenue"
+                    value={money(totals.totalExpectedSales)}
+                  />
+                  <SummaryRow
+                    label="Expected Batch Net Profit"
+                    value={money(totals.totalExpectedNetProfit)}
+                  />
+                </div>
+                {!totals.validation.ok ? (
+                  <p className="text-xs text-amber-700">{totals.validation.messages[0]}</p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        </aside>
       </div>
 
-      <Card className="print:hidden">
-        <CardHeader>
-          <CardTitle>Save options</CardTitle>
-          <CardDescription>
-            Applying cost or price updates the product for future sales only. Historical sales,
-            sale-line cost snapshots, COGS, and past profitability reports are never changed.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button type="button" disabled={saving} onClick={() => void handleSave('SAVED')}>
-            Save Calculation
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={saving}
-            onClick={() => void handleSave('DRAFT')}
-          >
-            Save as Draft
-          </Button>
-          <Button type="button" variant="outline" onClick={() => openApply('cost')}>
-            Apply Cost to Product
-          </Button>
-          <Button type="button" variant="outline" onClick={() => openApply('price')}>
-            Apply Selling Price to Product
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => openApply('both')}>
-            Apply Both
-          </Button>
-          <Button type="button" variant="outline" onClick={handlePrint}>
-            <Printer className="h-4 w-4" /> Print / Export
-          </Button>
-          <Button type="button" variant="outline" onClick={openExpense}>
-            Create Production Expense
-          </Button>
-          <Button type="button" variant="outline" onClick={openStock}>
-            Add Produced Stock
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="border-dashed">
-        <CardContent className="pt-6 text-sm text-zinc-600">
-          <p className="font-medium text-zinc-800">Accounting definitions</p>
-          <p className="mt-2">
-            Product Cost is the calculated cost to produce one unit. Production Expense is an
-            expense or cash transaction entered during a period. COGS is the sale-time product cost
-            of the units sold. These amounts may differ and must not be automatically treated as
-            the same value.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Mobile sticky summary */}
-      <div className="fixed inset-x-0 bottom-16 z-30 border-t border-teal-100 bg-white/95 px-4 py-2 shadow-lg backdrop-blur print:hidden md:bottom-0 lg:hidden">
-        <div className="mx-auto flex max-w-lg items-center justify-between gap-3 text-sm">
+      {/* Mobile sticky bar — above bottom nav */}
+      <div className="fixed inset-x-0 bottom-16 z-30 border-t border-teal-100 bg-white/95 px-3 py-2 shadow-lg backdrop-blur print:hidden lg:hidden">
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-2 text-xs">
           <div>
-            <p className="text-xs text-zinc-500">Cost / finished unit</p>
+            <p className="text-zinc-400">Cost / unit</p>
             <p className="font-semibold tabular-nums text-teal-800">{money(totals.costPerUnit)}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-zinc-500">Sell price</p>
+          <div>
+            <p className="text-zinc-400">Sell</p>
             <p className="font-semibold tabular-nums">{money(totals.suggestedSellingPrice)}</p>
+          </div>
+          <div>
+            <p className="text-zinc-400">Net profit</p>
+            <p className="font-semibold tabular-nums">{money(totals.profitAfterSellingCosts)}</p>
           </div>
           <Button size="sm" disabled={saving} onClick={() => void handleSave('SAVED')}>
             Save
@@ -1379,16 +1171,272 @@ export function CostPricingWorkspace({
         </div>
       </div>
 
+      {/* Edit cost line dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editLine && payload.lines.some((l) => l.id === editLine.id) ? 'Edit cost' : 'Add cost'}</DialogTitle>
+            <DialogDescription>
+              Choose a method. Only cost consumed by this batch is included.
+            </DialogDescription>
+          </DialogHeader>
+          {editLine ? (
+            <div className="grid gap-3">
+              <div className="space-y-1.5">
+                <Label>Cost item</Label>
+                <Input
+                  value={editLine.name}
+                  onChange={(e) => setEditLine({ ...editLine, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Category</Label>
+                <Select
+                  value={editLine.category}
+                  onValueChange={(v) => setEditLine({ ...editLine, category: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COST_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                    {!COST_CATEGORIES.includes(editLine.category as (typeof COST_CATEGORIES)[number]) &&
+                    editLine.category ? (
+                      <SelectItem value={editLine.category}>{editLine.category}</SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+                <Input
+                  className="mt-1"
+                  placeholder="Or type a custom category"
+                  value={
+                    COST_CATEGORIES.includes(editLine.category as (typeof COST_CATEGORIES)[number])
+                      ? ''
+                      : editLine.category
+                  }
+                  onChange={(e) => {
+                    if (e.target.value) setEditLine({ ...editLine, category: e.target.value })
+                  }}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Calculation method</Label>
+                <Select
+                  value={editLine.method}
+                  onValueChange={(v) =>
+                    setEditLine({ ...editLine, method: v as CostLineMethod })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COST_LINE_METHODS.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {editLine.method === 'fixedBatch' ? (
+                <div className="space-y-1.5">
+                  <Label>Amount</Label>
+                  <CurrencyInput
+                    currency={currency}
+                    value={editLine.fixedTotal}
+                    onChange={(v) => setEditLine({ ...editLine, fixedTotal: v })}
+                  />
+                </div>
+              ) : null}
+
+              {editLine.method === 'qtyUnit' ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Quantity used</Label>
+                    <Input
+                      value={editLine.quantity}
+                      onChange={(e) => setEditLine({ ...editLine, quantity: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Rate per unit</Label>
+                    <CurrencyInput
+                      currency={currency}
+                      value={editLine.unitCost}
+                      onChange={(v) => setEditLine({ ...editLine, unitCost: v })}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {editLine.method === 'labourHours' ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Labour hours</Label>
+                    <Input
+                      value={editLine.quantity}
+                      onChange={(e) => setEditLine({ ...editLine, quantity: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Hourly rate</Label>
+                    <CurrencyInput
+                      currency={currency}
+                      value={editLine.unitCost}
+                      onChange={(v) => setEditLine({ ...editLine, unitCost: v })}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {editLine.method === 'perFinishedUnit' ? (
+                <div className="space-y-1.5">
+                  <Label>Cost per finished unit</Label>
+                  <CurrencyInput
+                    currency={currency}
+                    value={editLine.unitCost}
+                    onChange={(v) => setEditLine({ ...editLine, unitCost: v })}
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Batch cost = {money(Number(editLine.unitCost) || 0)} × {saleableQty} saleable ={' '}
+                    {money((Number(editLine.unitCost) || 0) * saleableQty)}
+                  </p>
+                </div>
+              ) : null}
+
+              {editLine.method === 'bulkUsage' ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Purchased quantity</Label>
+                      <Input
+                        value={editLine.bulkPurchaseQty}
+                        onChange={(e) =>
+                          setEditLine({ ...editLine, bulkPurchaseQty: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Purchase unit</Label>
+                      <Select
+                        value={editLine.bulkPurchaseUnit}
+                        onValueChange={(v) =>
+                          setEditLine({
+                            ...editLine,
+                            bulkPurchaseUnit: v,
+                            usageUnit: editLine.usageUnit || v,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNIT_OPTIONS.map((u) => (
+                            <SelectItem key={u.value} value={u.value}>
+                              {u.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label>Total purchase amount</Label>
+                      <CurrencyInput
+                        currency={currency}
+                        value={editLine.bulkPurchaseAmount}
+                        onChange={(v) => setEditLine({ ...editLine, bulkPurchaseAmount: v })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Quantity used</Label>
+                      <Input
+                        value={editLine.quantityUsed}
+                        onChange={(e) =>
+                          setEditLine({ ...editLine, quantityUsed: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Usage unit</Label>
+                      <Select
+                        value={editLine.usageUnit || editLine.bulkPurchaseUnit}
+                        onValueChange={(v) => setEditLine({ ...editLine, usageUnit: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNIT_OPTIONS.map((u) => (
+                            <SelectItem key={u.value} value={u.value}>
+                              {u.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {editDetail ? (
+                    <div className="grid grid-cols-2 gap-2 rounded-md bg-zinc-50 p-3 text-xs">
+                      <div>
+                        <p className="text-zinc-400">Cost per unit</p>
+                        <p className="font-medium">{money(editDetail.bulkUnitCost ?? 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-zinc-400">Consumed cost</p>
+                        <p className="font-medium">{money(editDetail.total)}</p>
+                      </div>
+                      <div>
+                        <p className="text-zinc-400">Unused quantity</p>
+                        <p className="font-medium">
+                          {editDetail.remainingQty ?? 0}{' '}
+                          {unitLabel(editLine.usageUnit || editLine.bulkPurchaseUnit)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-zinc-400">Unused value</p>
+                        <p className="font-medium">{money(editDetail.remainingValue ?? 0)}</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="rounded-md bg-teal-50/50 px-3 py-2 text-sm">
+                <span className="text-zinc-500">Batch cost: </span>
+                <span className="font-semibold tabular-nums text-teal-800">
+                  {money(editDetail?.total ?? 0)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveEditLine}>
+              Save cost
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <ConfirmDialog
         open={applyOpen}
         onOpenChange={setApplyOpen}
         title="Apply to product?"
         description={
           applyMode === 'cost'
-            ? `Apply the calculated unit cost of ${money(totals.costPerUnit)} to this product? Future sales only — historical sales and COGS are unchanged.`
+            ? `Apply unit cost ${money(totals.costPerUnit)} for future sales only?`
             : applyMode === 'price'
-              ? `Apply the calculated selling price of ${money(totals.suggestedSellingPrice)} to this product? Future sales only — historical sales are unchanged.`
-              : `Apply the calculated unit cost of ${money(totals.costPerUnit)} and selling price of ${money(totals.suggestedSellingPrice)} to this product? This affects future transactions only — historical sales and COGS are unchanged.`
+              ? `Apply selling price ${money(totals.suggestedSellingPrice)} for future sales only?`
+              : `Apply unit cost ${money(totals.costPerUnit)} and selling price ${money(totals.suggestedSellingPrice)} to this product? Future sales only — historical sales and COGS unchanged.`
         }
         confirmLabel="Apply"
         onConfirm={confirmApply}
@@ -1399,10 +1447,8 @@ export function CostPricingWorkspace({
           <DialogHeader>
             <DialogTitle>Add produced stock?</DialogTitle>
             <DialogDescription>
-              Quantity {stockForm.quantity || 0} × {money(Number(stockForm.unitCost) || 0)} =
-              inventory value{' '}
-              {money((Number(stockForm.quantity) || 0) * (Number(stockForm.unitCost) || 0))}. Stock
-              is updated only after you confirm.
+              Inventory increases only after you confirm. Value:{' '}
+              {money((Number(stockForm.quantity) || 0) * (Number(stockForm.unitCost) || 0))}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1425,7 +1471,7 @@ export function CostPricingWorkspace({
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Finished quantity produced</Label>
+              <Label>Quantity</Label>
               <Input
                 value={stockForm.quantity}
                 onChange={(e) => setStockForm((s) => ({ ...s, quantity: e.target.value }))}
@@ -1454,20 +1500,6 @@ export function CostPricingWorkspace({
                 onChange={(e) => setStockForm((s) => ({ ...s, batchReference: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
-              <Label>Storage location</Label>
-              <Input
-                value={stockForm.storageLocation}
-                onChange={(e) => setStockForm((s) => ({ ...s, storageLocation: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label>Notes</Label>
-              <Input
-                value={stockForm.notes}
-                onChange={(e) => setStockForm((s) => ({ ...s, notes: e.target.value }))}
-              />
-            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setStockOpen(false)}>
@@ -1491,9 +1523,7 @@ export function CostPricingWorkspace({
                   toast.error(result.error)
                   return
                 }
-                toast.success(
-                  `Stock added. Inventory value ${money(result.data.inventoryValue)}`,
-                )
+                toast.success(`Stock added. Value ${money(result.data.inventoryValue)}`)
                 setStockOpen(false)
               }}
             >
@@ -1508,8 +1538,8 @@ export function CostPricingWorkspace({
           <DialogHeader>
             <DialogTitle>Create production expenses?</DialogTitle>
             <DialogDescription>
-              This will create expense records totaling {money(expensePreviewTotal)}. Saving a
-              calculation never creates expenses automatically. Duplicate creation is blocked.
+              Create this expense only if these production costs have not already been recorded in
+              Expenses. Otherwise costs may be duplicated. Total: {money(expensePreviewTotal)}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 text-sm">
@@ -1551,7 +1581,7 @@ export function CostPricingWorkspace({
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Unlinked / reporting only" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Unlinked / Reporting only</SelectItem>
@@ -1563,41 +1593,33 @@ export function CostPricingWorkspace({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Cost components</Label>
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border p-2">
-                {payload.lines
-                  .filter((l) => l.includeInUnitCost)
-                  .map((line) => {
-                    const amount = totals.lineTotals.find((t) => t.id === line.id)?.total ?? 0
-                    const checked = expenseForm.lineIds.includes(line.id)
-                    return (
-                      <label
-                        key={line.id}
-                        className="flex items-center justify-between gap-2 text-sm"
-                      >
-                        <span className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setExpenseForm((s) => ({
-                                ...s,
-                                lineIds: e.target.checked
-                                  ? [...s.lineIds, line.id]
-                                  : s.lineIds.filter((id) => id !== line.id),
-                              }))
-                            }}
-                          />
-                          {line.name || line.category}
-                          <span className="text-zinc-400">· {line.category} · PRODUCTION</span>
-                        </span>
-                        <span className="tabular-nums">{money(amount)}</span>
-                      </label>
-                    )
-                  })}
-              </div>
-              <p className="text-xs text-zinc-500">Total amount: {money(expensePreviewTotal)}</p>
+            <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border p-2">
+              {payload.lines
+                .filter((l) => l.includeInUnitCost)
+                .map((line) => {
+                  const amount = totals.lineTotals.find((t) => t.id === line.id)?.total ?? 0
+                  const checked = expenseForm.lineIds.includes(line.id)
+                  return (
+                    <label key={line.id} className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setExpenseForm((s) => ({
+                              ...s,
+                              lineIds: e.target.checked
+                                ? [...s.lineIds, line.id]
+                                : s.lineIds.filter((id) => id !== line.id),
+                            }))
+                          }}
+                        />
+                        {line.name}
+                      </span>
+                      <span className="tabular-nums">{money(amount)}</span>
+                    </label>
+                  )
+                })}
             </div>
           </div>
           <DialogFooter>
@@ -1622,9 +1644,7 @@ export function CostPricingWorkspace({
                 }
                 setHistory((prev) =>
                   prev.map((h) =>
-                    h.id === calculationId
-                      ? { ...h, expenseIds: result.data.expenseIds }
-                      : h,
+                    h.id === calculationId ? { ...h, expenseIds: result.data.expenseIds } : h,
                   ),
                 )
                 toast.success(result.message || 'Expenses created')

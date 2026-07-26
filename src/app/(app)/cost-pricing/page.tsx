@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
-import { PageHeader } from '@/components/shared/page-header'
 import { CostPricingWorkspace } from '@/components/cost-pricing/cost-pricing-workspace'
 
 export default async function CostPricingPage() {
@@ -39,45 +38,39 @@ export default async function CostPricingPage() {
   ])
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Product Cost & Pricing Calculator"
-        description="Calculate product cost, selling price, profit and margin."
-      />
-      <CostPricingWorkspace
-        currency={profile.currency}
-        products={products.map((p) => ({
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          sku: p.sku,
-          currentStock: p.currentStock,
-          costPrice: p.costPrice.toString(),
-          sellingPrice: p.sellingPrice.toString(),
-        }))}
-        initialHistory={calculations.map((r) => ({
-          id: r.id,
-          name: r.name,
-          productId: r.productId,
-          productName: r.product?.name ?? null,
-          quantity: r.quantity,
-          unit: r.unit,
-          calculationDate: r.calculationDate.toISOString().slice(0, 10),
-          status: r.status,
-          totalBatchCost: r.totalBatchCost.toString(),
-          costPerUnit: r.costPerUnit.toString(),
-          suggestedSellingPrice: r.suggestedSellingPrice.toString(),
-          grossMarginPct: r.grossMarginPct.toString(),
-          expenseIds: r.expenseIds,
-          updatedAt: r.updatedAt.toISOString(),
-        }))}
-        expenseCategories={expenseCategories.map((c) => ({
-          id: c.id,
-          name: c.name,
-          defaultCostType: c.defaultCostType,
-        }))}
-        cashAccounts={cashAccounts}
-      />
-    </div>
+    <CostPricingWorkspace
+      currency={profile.currency}
+      products={products.map((p) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        sku: p.sku,
+        currentStock: p.currentStock,
+        costPrice: p.costPrice.toString(),
+        sellingPrice: p.sellingPrice.toString(),
+      }))}
+      initialHistory={calculations.map((r) => ({
+        id: r.id,
+        name: r.name,
+        productId: r.productId,
+        productName: r.product?.name ?? null,
+        quantity: r.quantity,
+        unit: r.unit,
+        calculationDate: r.calculationDate.toISOString().slice(0, 10),
+        status: r.status,
+        totalBatchCost: r.totalBatchCost.toString(),
+        costPerUnit: r.costPerUnit.toString(),
+        suggestedSellingPrice: r.suggestedSellingPrice.toString(),
+        grossMarginPct: r.grossMarginPct.toString(),
+        expenseIds: r.expenseIds,
+        updatedAt: r.updatedAt.toISOString(),
+      }))}
+      expenseCategories={expenseCategories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        defaultCostType: c.defaultCostType,
+      }))}
+      cashAccounts={cashAccounts}
+    />
   )
 }

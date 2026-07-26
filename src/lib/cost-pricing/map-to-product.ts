@@ -1,4 +1,3 @@
-import { lineTotal } from '@/lib/cost-pricing/compute'
 import type { CostPricingPayload, CostPricingTotals } from '@/lib/cost-pricing/types'
 import {
   emptyCostBreakdown,
@@ -7,29 +6,12 @@ import {
 } from '@/lib/product-cost'
 import { moneyString } from '@/lib/money'
 
-function sumCategory(payload: CostPricingPayload, category: string): number {
-  return payload.lines
-    .filter((l) => l.includeInUnitCost && l.category === category)
-    .reduce((sum, l) => sum + lineTotal(l), 0)
-}
-
 /** Map calculator state into the product catalog costBreakdown shape. */
 export function payloadToProductCostBreakdown(
   payload: CostPricingPayload,
   totals: CostPricingTotals,
 ): ProductCostBreakdown {
-  const materials = sumCategory(payload, 'Materials')
-  const labour = sumCategory(payload, 'Direct Labour')
-  const packaging = sumCategory(payload, 'Packaging')
-  const transport = sumCategory(payload, 'Production Transportation')
-  const design = sumCategory(payload, 'Design')
-  const mfgOh = sumCategory(payload, 'Manufacturing Overhead')
-  const other = sumCategory(payload, 'Other Production Cost')
-
   const custom = [
-    mfgOh > 0
-      ? { id: 'mfg-overhead', name: 'Manufacturing Overhead', amount: moneyString(mfgOh) }
-      : null,
     totals.wastageCost > 0
       ? { id: 'wastage', name: 'Wastage', amount: moneyString(totals.wastageCost) }
       : null,
@@ -50,18 +32,23 @@ export function payloadToProductCostBreakdown(
           amount: moneyString(totals.allocatedOverhead),
         }
       : null,
+    totals.otherDirectCost > 0
+      ? {
+          id: 'other-direct',
+          name: 'Other Direct Production Cost',
+          amount: moneyString(totals.otherDirectCost),
+        }
+      : null,
   ].filter(Boolean) as { id: string; name: string; amount: string }[]
 
-  const base = emptyCostBreakdown(payload.quantity)
+  const base = emptyCostBreakdown(totals.quantity)
   return normalizeCostBreakdown({
     ...base,
-    productionQuantity: payload.quantity,
-    materials: moneyString(materials),
-    stitching: moneyString(labour),
-    design: moneyString(design),
-    packaging: moneyString(packaging),
-    inwardTransport: moneyString(transport),
-    otherProduction: moneyString(other),
+    productionQuantity: totals.quantity,
+    materials: moneyString(totals.materialsCost),
+    stitching: moneyString(totals.directLabourCost),
+    packaging: moneyString(totals.packagingCost),
+    inwardTransport: moneyString(totals.transportationCost),
     customProductionCosts: custom,
   })
 }

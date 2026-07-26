@@ -16,7 +16,7 @@ export function createEmptyCostLine(
     description: '',
     method,
     quantity: '',
-    unit: 'pcs',
+    unit: method === 'labourHours' ? 'hour' : 'pcs',
     unitCost: '',
     fixedTotal: '',
     bulkPurchaseQty: '',
@@ -33,12 +33,19 @@ export function defaultCostLines(): CostLine[] {
     createEmptyCostLine('Materials', 'Materials', 'fixedBatch'),
     createEmptyCostLine('Direct Labour', 'Direct labour', 'fixedBatch'),
     createEmptyCostLine('Packaging', 'Packaging', 'fixedBatch'),
-    createEmptyCostLine('Production Transportation', 'Transportation', 'fixedBatch'),
+    createEmptyCostLine('Transportation', 'Transportation', 'fixedBatch'),
   ]
 }
 
 /** Normalize older saved payloads that lack method / bulk fields. */
 export function normalizeCostLine(raw: Partial<CostLine> & { id?: string }): CostLine {
+  const legacyCategory =
+    raw.category === 'Production Transportation'
+      ? 'Transportation'
+      : raw.category === 'Other Production Cost'
+        ? 'Other Direct Production Cost'
+        : raw.category
+
   const inferredMethod: CostLineMethod =
     raw.method ||
     (raw.bulkPurchaseAmount || raw.bulkPurchaseQty
@@ -48,11 +55,12 @@ export function normalizeCostLine(raw: Partial<CostLine> & { id?: string }): Cos
         : 'qtyUnit')
 
   return {
-    ...createEmptyCostLine(raw.category || 'Materials', raw.name || '', inferredMethod),
+    ...createEmptyCostLine(legacyCategory || 'Materials', raw.name || '', inferredMethod),
     ...raw,
+    category: legacyCategory || raw.category || 'Materials',
     id: raw.id || lineId(),
     method: inferredMethod,
-    unit: raw.unit || 'pcs',
+    unit: raw.unit || (inferredMethod === 'labourHours' ? 'hour' : 'pcs'),
     bulkPurchaseUnit: raw.bulkPurchaseUnit || 'm',
     usageUnit: raw.usageUnit || raw.bulkPurchaseUnit || 'm',
     includeInUnitCost: raw.includeInUnitCost !== false,
@@ -101,20 +109,20 @@ export function createDefaultPayload(partial?: Partial<CostPricingPayload>): Cos
   return merged
 }
 
-export const COST_CATEGORIES: CostLine['category'][] = [
+export const COST_CATEGORIES = [
   'Materials',
   'Direct Labour',
   'Packaging',
-  'Design',
-  'Production Transportation',
-  'Manufacturing Overhead',
-  'Other Production Cost',
-]
+  'Transportation',
+  'Other Direct Production Cost',
+] as const
 
 export const COST_LINE_METHODS: { value: CostLineMethod; label: string }[] = [
-  { value: 'qtyUnit', label: 'Quantity × Unit Cost' },
-  { value: 'fixedBatch', label: 'Fixed Batch Cost' },
-  { value: 'bulkUsage', label: 'Bulk Purchase Usage' },
+  { value: 'fixedBatch', label: 'Fixed Batch Amount' },
+  { value: 'bulkUsage', label: 'Bulk Material Consumption' },
+  { value: 'qtyUnit', label: 'Quantity × Rate' },
+  { value: 'labourHours', label: 'Labour Hours × Rate' },
+  { value: 'perFinishedUnit', label: 'Cost Per Finished Unit' },
 ]
 
 export { MEASURE_UNIT_OPTIONS as UNIT_OPTIONS } from '@/lib/cost-pricing/units'
