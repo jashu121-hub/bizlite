@@ -30,6 +30,7 @@ export function cashTransactionTypeLabel(type: string) {
     TRANSFER_OUT: 'Transfer Out',
     SALE_RECEIPT: 'Sale Receipt',
     EXPENSE_PAYMENT: 'Expense Payment',
+    PURCHASE_PAYMENT: 'Stock Purchase Payment',
     CUSTOMER_PAYMENT: 'Customer Payment',
     BALANCE_ADJUSTMENT: 'Balance Adjustment',
   }

@@ -125,16 +125,30 @@ export const STOCK_REASONS = [
   'Other',
 ] as const
 
-export const addStockSchema = z.object({
-  productId: z.string().min(1),
-  quantity: positiveQuantitySchema,
-  date: dateStringSchema,
-  purchaseCost: moneySchema.optional().or(z.literal('')),
-  supplier: z.string().max(160).optional().or(z.literal('')),
-  reference: z.string().max(120).optional().or(z.literal('')),
-  notes: z.string().max(500).optional().or(z.literal('')),
-  costBreakdown: productCostBreakdownSchema.nullable().optional(),
-})
+export const addStockSchema = z
+  .object({
+    productId: z.string().min(1),
+    quantity: positiveQuantitySchema,
+    date: dateStringSchema,
+    /** Purchase cost per unit — not the total invoice value. */
+    purchaseCost: requiredPositiveMoneySchema,
+    supplier: z.string().max(160).optional().or(z.literal('')),
+    reference: z.string().max(120).optional().or(z.literal('')),
+    notes: z.string().max(500).optional().or(z.literal('')),
+    /** PAID = reduce cash/bank; UNPAID = inventory only (credit purchase). */
+    paymentMode: z.enum(['PAID', 'UNPAID']).default('PAID'),
+    cashAccountId: z.string().optional().or(z.literal('')),
+    costBreakdown: productCostBreakdownSchema.nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.paymentMode === 'PAID' && !data.cashAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select Cash or Bank account for this purchase payment',
+        path: ['cashAccountId'],
+      })
+    }
+  })
 
 export const adjustStockDetailedSchema = z
   .object({

@@ -10,6 +10,7 @@ import {
   normalizeCostBreakdown,
   type ProductCostBreakdown,
 } from '@/lib/product-cost'
+import { postPurchasePaymentInTx } from '@/lib/services/cash-accounts'
 import { applyStockIssue, applyStockReceipt, tracksInventory } from '@/lib/services/inventory'
 import {
   addStockSchema,
@@ -295,14 +296,46 @@ export async function restoreProductAction(id: string) {
   }
 }
 
+export async function listPurchaseCashAccountsAction() {
+  try {
+    const { user } = await requireProfile()
+    const accounts = await prisma.cashAccount.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true, type: true, currentBalance: true },
+      orderBy: { name: 'asc' },
+    })
+    return ok(
+      accounts.map((a) => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        currentBalance: a.currentBalance.toString(),
+      })),
+    )
+  } catch (error) {
+    console.error('listPurchaseCashAccountsAction', error)
+    return fail('Unable to load cash accounts')
+  }
+}
+
+/**
+ * Record a stock purchase as inventory (asset), optionally paid from cash/bank.
+ * Never creates an operating expense — only sold units become COGS later.
+ */
 export async function addStockAction(raw: unknown) {
   try {
     const { user } = await requireProfile()
     const parsed = addStockSchema.safeParse(raw)
-    if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid stock addition')
+    if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid stock purchase')
     const data = parsed.data
 
-    await prisma.$transaction(async (tx) => {
+    const unitCost = moneyNumber(data.purchaseCost)
+    if (!(unitCost > 0)) {
+      return fail('Purchase cost per unit must be greater than zero')
+    }
+    const totalPurchaseValue = moneyNumber(money(unitCost).times(data.quantity))
+
+    const result = await prisma.$transaction(async (tx) => {
       const product = await tx.product.findFirst({
         where: { id: data.productId, userId: user.id },
       })
@@ -313,51 +346,62 @@ export async function addStockAction(raw: unknown) {
 
       const noteParts = [
         data.supplier ? `Supplier: ${data.supplier}` : null,
+        data.paymentMode === 'UNPAID' ? 'Unpaid / on credit' : null,
         data.notes || null,
       ].filter(Boolean)
 
-      const batchBreakdown = data.costBreakdown
-        ? normalizeCostBreakdown(data.costBreakdown)
-        : null
-      const hasBatchProduction =
-        Boolean(batchBreakdown) && money(batchBreakdown!.totalProductionCost).gt(0)
-      const hasBatchBreakdown =
-        Boolean(batchBreakdown) &&
-        (hasBatchProduction || money(batchBreakdown!.totalSellingCost).gt(0))
-
-      const unitCost = hasBatchProduction
-        ? batchBreakdown!.inventoryCostPerUnit
-        : data.purchaseCost !== '' && data.purchaseCost != null
-          ? String(data.purchaseCost)
-          : moneyNumber(product.defaultPurchaseCost) > 0
-            ? product.defaultPurchaseCost.toString()
-            : product.costPrice.toString()
-
-      await applyStockReceipt(tx, {
+      const receipt = await applyStockReceipt(tx, {
         userId: user.id,
         productId: product.id,
         quantity: data.quantity,
         unitCost,
-        type: 'ADJUSTMENT_IN',
+        type: 'PURCHASE',
         date: data.date,
         reason: 'New Purchase',
         reference: data.reference || null,
-        notes: noteParts.join(' · ') || 'Stock added',
+        notes: noteParts.join(' · ') || 'Stock purchase',
       })
 
-      if (hasBatchBreakdown) {
-        await tx.product.update({
-          where: { id: product.id },
-          data: { costBreakdown: toCostBreakdownJson(batchBreakdown) },
+      // Keep default purchase cost as the last paid unit cost for future receipts.
+      await tx.product.update({
+        where: { id: product.id },
+        data: { defaultPurchaseCost: prismaDecimal(unitCost) },
+      })
+
+      if (data.paymentMode === 'PAID' && data.cashAccountId) {
+        await postPurchasePaymentInTx(tx, {
+          userId: user.id,
+          accountId: data.cashAccountId,
+          amount: totalPurchaseValue,
+          date: toDateOnly(data.date),
+          stockMovementId: receipt.movementId,
+          reference: data.reference || null,
+          notes: `Stock purchase · ${product.name} · ${data.quantity} × ${unitCost.toFixed(2)}`,
         })
+      }
+
+      return {
+        quantity: data.quantity,
+        unitCost,
+        totalPurchaseValue,
+        averageCostAfter: receipt.averageCostAfter,
+        paid: data.paymentMode === 'PAID',
       }
     })
 
     revalidateProductPaths(data.productId)
-    return ok(undefined, 'Stock added')
+    revalidatePath('/cash-bank')
+    revalidatePath('/dashboard')
+    revalidatePath('/reports')
+    return ok(
+      result,
+      data.paymentMode === 'PAID'
+        ? `Stock purchased. Inventory +${result.totalPurchaseValue.toFixed(2)}; cash/bank reduced. Not an expense.`
+        : `Stock purchased on credit. Inventory +${result.totalPurchaseValue.toFixed(2)}. Not an expense.`,
+    )
   } catch (error) {
     console.error('addStockAction', error)
-    return fail(error instanceof Error ? error.message : 'Unable to add stock')
+    return fail(error instanceof Error ? error.message : 'Unable to add stock purchase')
   }
 }
 

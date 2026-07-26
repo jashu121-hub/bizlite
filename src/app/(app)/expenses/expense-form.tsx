@@ -373,8 +373,9 @@ export function ExpenseForm({
             </select>
             {updateInventory ? (
               <p className="text-xs text-zinc-500">
-                Yes increases product stock and updates weighted-average costPrice from unit cost (or
-                amount ÷ quantity).
+                Yes increases product stock and updates weighted-average inventory cost. For buying
+                resale stock, prefer Products → Purchase Stock so the payment is recorded as a cash
+                asset swap — not an operating expense. Only sold units become COGS.
               </p>
             ) : null}
           </Field>

@@ -65,11 +65,12 @@ export function ProductsTab({ data, currency }: { data: ReportsData; currency: s
         <ReportDataTable
           headers={[
             { key: 'product', label: 'Product' },
-            { key: 'qty', label: 'Quantity Sold', align: 'right' },
+            { key: 'qty', label: 'Units Sold', align: 'right' },
             { key: 'revenue', label: 'Revenue', align: 'right' },
-            { key: 'cost', label: 'Cost', align: 'right' },
+            { key: 'cost', label: 'COGS', align: 'right' },
             { key: 'gp', label: 'Gross Profit', align: 'right' },
-            { key: 'margin', label: 'Margin', align: 'right' },
+            { key: 'margin', label: 'Gross Margin', align: 'right' },
+            { key: 'markup', label: 'Markup', align: 'right' },
             { key: 'status', label: 'Status' },
           ]}
           rows={rows.map((row) => ({
@@ -86,6 +87,7 @@ export function ProductsTab({ data, currency }: { data: ReportsData; currency: s
                 {money(row.grossProfit)}
               </span>,
               `${row.margin.toFixed(2)}%`,
+              `${row.markup.toFixed(2)}%`,
               <StatusBadge key="st" status={row.status} />,
             ],
           }))}

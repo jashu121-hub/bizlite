@@ -88,10 +88,12 @@ export function InventoryTab({ data, currency }: { data: ReportsData; currency: 
         <ReportDataTable
           headers={[
             { key: 'product', label: 'Product' },
-            { key: 'stock', label: 'Current Stock', align: 'right' },
+            { key: 'purchased', label: 'Purchased', align: 'right' },
+            { key: 'sold', label: 'Sold', align: 'right' },
+            { key: 'balance', label: 'Balance', align: 'right' },
             { key: 'avg', label: 'Average Unit Cost', align: 'right' },
             { key: 'sell', label: 'Selling Price', align: 'right' },
-            { key: 'value', label: 'Stock Value', align: 'right' },
+            { key: 'value', label: 'Closing Value', align: 'right' },
             { key: 'potential', label: 'Potential Sales Value', align: 'right' },
             { key: 'pgp', label: 'Potential Gross Profit', align: 'right' },
             { key: 'status', label: 'Status' },
@@ -100,7 +102,9 @@ export function InventoryTab({ data, currency }: { data: ReportsData; currency: 
             key: row.id,
             cells: [
               row.product,
-              row.currentStock,
+              row.purchased,
+              row.sold,
+              row.balance,
               money(row.costPrice),
               money(row.sellingPrice),
               money(row.stockCostValue),

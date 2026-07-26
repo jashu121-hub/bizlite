@@ -126,7 +126,7 @@ export function ProductDetailsModal({
           ) : null}
           {product.productType === 'RESALE' ? (
             <Item
-              label="Default purchase cost"
+              label="Purchase cost per unit"
               value={
                 <CurrencyDisplay value={product.defaultPurchaseCost} currency={currency} />
               }

@@ -211,9 +211,9 @@ export function ProductForm({
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Label>Default selling price</Label>
+            <Label>Default selling price per unit</Label>
             <FieldHelp
-              label="Default Selling Price"
+              label="Default Selling Price Per Unit"
               text="Suggested price for future sales. It can be changed on the invoice."
               guideHref="/help#product-costing"
             />
@@ -226,7 +226,7 @@ export function ProductForm({
             }
           />
           <p className="text-xs text-zinc-500">
-            Suggested price for future sales. It can be changed on the invoice.
+            Suggested price per unit for future sales. It can be changed on the invoice.
           </p>
           <p className="text-sm text-red-600" role="alert">
             {String(form.formState.errors.sellingPrice?.message ?? '')}
@@ -275,13 +275,13 @@ export function ProductForm({
           <div>
             <h3 className="text-sm font-semibold text-zinc-900">Cost and opening stock</h3>
             <p className="text-xs text-zinc-500">
-              Default purchase cost is a suggestion for future stock receipts. It does not revalue
-              existing inventory.
+              Enter purchase cost per unit (e.g. AED 100), not the total invoice. Total stock value
+              = quantity × unit cost, and is inventory — not an expense.
             </p>
           </div>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Default purchase cost</Label>
+              <Label>Purchase cost per unit</Label>
               <CurrencyInput
                 currency={currency}
                 value={form.watch('defaultPurchaseCost') || form.watch('costPrice')}
@@ -293,11 +293,14 @@ export function ProductForm({
                   form.setValue('costPrice', value || '0', { shouldDirty: true })
                 }}
               />
+              <p className="text-xs text-zinc-500">
+                Suggested unit cost for future purchases. Does not revalue existing stock.
+              </p>
             </div>
             {!hideOpeningStock ? (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="openingStock">Opening stock</Label>
+                  <Label htmlFor="openingStock">Opening or starting stock</Label>
                   <NumberInput
                     id="openingStock"
                     integer

@@ -62,7 +62,10 @@ export type ProductProfitabilityRow = {
   sales: number
   costOfGoodsSold: number
   grossProfit: number
+  /** Gross margin % = Gross Profit ÷ Net Sales */
   margin: number
+  /** Markup % = Gross Profit ÷ COGS */
+  markup: number
 }
 
 export type SalesProfitabilityResult = {
@@ -315,6 +318,8 @@ export function calculateSalesProfitability(
       const costOfGoodsSold = moneyNumber(row.costOfGoodsSold)
       const grossProfit = moneyNumber(subMoney(row.sales, row.costOfGoodsSold))
       const margin = sales > 0 ? moneyNumber(percent(grossProfit, sales)) : 0
+      const markup =
+        costOfGoodsSold > 0 ? moneyNumber(percent(grossProfit, costOfGoodsSold)) : 0
       return {
         productId: row.productId,
         productName: row.productName,
@@ -323,6 +328,7 @@ export function calculateSalesProfitability(
         costOfGoodsSold,
         grossProfit,
         margin,
+        markup,
       }
     })
     .sort((a, b) => b.sales - a.sales)

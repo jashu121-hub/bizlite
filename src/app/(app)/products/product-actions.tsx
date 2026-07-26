@@ -59,7 +59,7 @@ export function ProductActions({
               <>
                 <DropdownMenuItem onClick={() => setActive('add')}>
                   <PackagePlus className="h-4 w-4" />
-                  Add Stock
+                  Purchase Stock
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActive('adjust')}>
                   <SlidersHorizontal className="h-4 w-4" />
@@ -110,7 +110,7 @@ export function ProductActions({
           {isService ? null : (
             <Button type="button" size="sm" variant="outline" onClick={() => setActive('add')}>
               <PackagePlus className="h-3.5 w-3.5" />
-              Add Stock
+              Purchase Stock
             </Button>
           )}
           <DropdownMenu>

@@ -177,10 +177,12 @@ export function ExportReportMenu({
       tableCsv(
         [
           'Product',
-          'Current stock',
+          'Purchased',
+          'Sold',
+          'Balance',
           'Average unit cost',
           'Selling price',
-          'Stock value',
+          'Closing value',
           'Potential sales value',
           'Potential gross profit',
           'Status',
@@ -188,7 +190,9 @@ export function ExportReportMenu({
         ],
         data.inventory.rows.map((row) => [
           row.product,
-          row.currentStock,
+          row.purchased,
+          row.sold,
+          row.balance,
           row.costPrice,
           row.sellingPrice,
           row.stockCostValue,

@@ -54,6 +54,7 @@ enum InventoryDestination {
 
 enum StockMovementType {
   OPENING
+  PURCHASE
   SALE
   SALE_REVERSAL
   ADJUSTMENT_IN
@@ -83,6 +84,7 @@ enum CashTransactionType {
   TRANSFER_OUT
   SALE_RECEIPT
   EXPENSE_PAYMENT
+  PURCHASE_PAYMENT
   CUSTOMER_PAYMENT
   BALANCE_ADJUSTMENT
 }
@@ -152,9 +154,10 @@ model CashTransaction {
   reference     String?
   notes         String?
   transferGroupId String?
-  saleId        String?
-  expenseId     String?
-  createdAt     DateTime             @default(now())
+  saleId           String?
+  expenseId        String?
+  stockMovementId  String?
+  createdAt        DateTime             @default(now())
 
   user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   account CashAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -162,6 +165,7 @@ model CashTransaction {
   @@index([userId])
   @@index([accountId])
   @@index([userId, date])
+  @@index([stockMovementId])
   @@index([saleId])
   @@index([expenseId])
   @@index([transferGroupId])

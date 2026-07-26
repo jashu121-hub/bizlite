@@ -34,6 +34,7 @@ async function postTransaction(
     transferGroupId?: string | null
     saleId?: string | null
     expenseId?: string | null
+    stockMovementId?: string | null
   },
 ) {
   const account = await getOwnedAccount(input.userId, input.accountId, tx)
@@ -57,7 +58,42 @@ async function postTransaction(
       transferGroupId: input.transferGroupId ?? null,
       saleId: input.saleId ?? null,
       expenseId: input.expenseId ?? null,
+      stockMovementId: input.stockMovementId ?? null,
     },
+  })
+}
+
+/**
+ * Pay for inventory purchase from cash/bank.
+ * This is an asset swap (cash ↓ inventory ↑), not an operating expense.
+ */
+export async function postPurchasePaymentInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    userId: string
+    accountId: string
+    amount: string | number
+    date: Date
+    stockMovementId?: string | null
+    reference?: string | null
+    notes?: string | null
+  },
+) {
+  const paid = money(input.amount)
+  if (paid.lte(0)) throw new Error('Purchase payment must be greater than zero')
+  const account = await getOwnedAccount(input.userId, input.accountId, tx)
+  if (money(account.currentBalance).lt(paid)) {
+    throw new Error('Insufficient account balance for this stock purchase')
+  }
+  return postTransaction(tx, {
+    userId: input.userId,
+    accountId: input.accountId,
+    type: 'PURCHASE_PAYMENT',
+    date: input.date,
+    amount: paid.negated(),
+    stockMovementId: input.stockMovementId,
+    reference: input.reference,
+    notes: input.notes ?? 'Stock purchase payment',
   })
 }
 

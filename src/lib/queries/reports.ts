@@ -72,7 +72,8 @@ export async function getReportsData(userId: string, params: DashboardDateParams
   const dateFilter = prismaDateFilter(range)
   const periodWhere = { userId, ...(dateFilter ? { date: dateFilter } : {}) }
 
-  const [sales, expenses, products, outstandingSales, profile] = await Promise.all([
+  const [sales, expenses, products, outstandingSales, profile, inventoryMovements] =
+    await Promise.all([
     prisma.sale.findMany({
       where: periodWhere,
       select: {
@@ -160,7 +161,39 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       where: { id: userId },
       select: { costingMode: true },
     }),
+    prisma.stockMovement.findMany({
+      where: { userId },
+      select: {
+        productId: true,
+        type: true,
+        quantity: true,
+      },
+    }),
   ])
+
+  const inventoryStatsByProduct = new Map<
+    string,
+    { purchased: number; produced: number; sold: number; opening: number }
+  >()
+  for (const movement of inventoryMovements) {
+    const current = inventoryStatsByProduct.get(movement.productId) ?? {
+      purchased: 0,
+      produced: 0,
+      sold: 0,
+      opening: 0,
+    }
+    // PURCHASE + legacy ADJUSTMENT_IN receipts count as purchased/added stock.
+    if (movement.type === 'PURCHASE' || movement.type === 'ADJUSTMENT_IN') {
+      current.purchased += Math.max(0, movement.quantity)
+    } else if (movement.type === 'PRODUCTION_RECEIPT') {
+      current.produced += Math.max(0, movement.quantity)
+    } else if (movement.type === 'OPENING') {
+      current.opening += Math.max(0, movement.quantity)
+    } else if (movement.type === 'SALE') {
+      current.sold += Math.abs(movement.quantity)
+    }
+    inventoryStatsByProduct.set(movement.productId, current)
+  }
 
   const costingMode = profile?.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY'
   const totalPaidSales = addMoney(...sales.map((sale) => sale.amountPaid))
@@ -502,6 +535,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     cost: row.costOfGoodsSold,
     grossProfit: row.grossProfit,
     margin: row.margin,
+    markup: row.markup,
     status: productMarginStatus(row.grossProfit, row.sales, row.margin),
   }))
 
@@ -719,10 +753,20 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         const potentialSellingValue = moneyNumber(
           money(product.sellingPrice).times(product.currentStock),
         )
+        const stats = inventoryStatsByProduct.get(product.id) ?? {
+          purchased: 0,
+          produced: 0,
+          sold: 0,
+          opening: 0,
+        }
+        const purchased = stats.purchased + stats.produced + stats.opening
         return {
           id: product.id,
           product: product.name,
           currentStock: product.currentStock,
+          purchased,
+          sold: stats.sold,
+          balance: product.currentStock,
           costPrice: moneyNumber(product.costPrice),
           sellingPrice: moneyNumber(product.sellingPrice),
           stockCostValue,
