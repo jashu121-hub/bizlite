@@ -19,6 +19,7 @@ import {
   toLocalDateInput,
   type DashboardDateParams,
 } from '@/lib/dashboard-date-range'
+import { isOperatingExpenseCostType } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
@@ -63,6 +64,7 @@ async function sumOperatingExpenses(userId: string, from: Date | null, to: Date 
     where: {
       userId,
       ...(date ? { date } : {}),
+      // Operating expenses only — exclude PRODUCTION / inventory purchases
       OR: [{ costType: null }, { costType: { in: ['SELLING', 'OVERHEAD'] } }],
     },
     select: { amount: true },
@@ -254,8 +256,8 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   )
   const lowStock = products.filter((p) => p.currentStock <= p.lowStockLevel)
 
-  const operatingExpenseRows = periodExpenses.filter(
-    (expense) => expense.costType !== 'PRODUCTION',
+  const operatingExpenseRows = periodExpenses.filter((expense) =>
+    isOperatingExpenseCostType(expense.costType),
   )
   const expenseByCategory = new Map<string, number>()
   for (const exp of operatingExpenseRows) {
@@ -341,7 +343,8 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const kpiSummaries = buildKpiSummaries({
     todaySalesRows,
     periodSalesRows: periodSales,
-    periodExpenseRows: periodExpenses,
+    // Same operating-expense set as KPI total, charts, and comparisons
+    periodExpenseRows: operatingExpenseRows,
     pendingSalesAll,
     products,
     cards: {
@@ -403,7 +406,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     charts: {
       salesVsExpenses: [
         { name: 'Sales', value: periodRevenue },
-        { name: 'Expenses', value: periodExpenseTotal },
+        { name: 'Operating Expenses', value: periodExpenseTotal },
       ],
       dailyNet: profitTrend,
       profitTrendGrouping: grouping,

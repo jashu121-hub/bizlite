@@ -132,7 +132,7 @@ export function KpiSummaryModal({ open, onOpenChange, summary, currency, loading
                             <span className="min-w-0 truncate font-medium text-zinc-800">
                               {cat.name}
                               <span className="ml-1.5 text-xs font-normal text-zinc-400">
-                                {cat.percent.toFixed(0)}%
+                                {cat.percent.toFixed(2)}%
                               </span>
                             </span>
                             <CurrencyDisplay

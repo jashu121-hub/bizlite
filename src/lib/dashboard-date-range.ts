@@ -94,7 +94,7 @@ export function formatPeriodMetricLabel(
   periodType: DateFilterPreset,
   metric: 'sales' | 'expenses',
 ): string {
-  const suffix = metric === 'sales' ? 'Sales' : 'Expenses'
+  const suffix = metric === 'sales' ? 'Sales' : 'Operating Expenses'
   switch (periodType) {
     case 'month':
       return `This Month ${suffix}`

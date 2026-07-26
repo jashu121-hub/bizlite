@@ -45,7 +45,9 @@ export function DashboardCharts({
     <section className="grid gap-4 xl:grid-cols-3">
       <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
         <h3 className="mb-1 text-sm font-semibold text-zinc-800">Sales vs Expenses</h3>
-        <p className="mb-4 text-xs text-zinc-500">Period comparison</p>
+        <p className="mb-4 text-xs text-zinc-500">
+          Operating expenses only (excludes production / inventory purchases)
+        </p>
         {charts.salesVsExpenses.every((r) => !r.value) ? (
           <EmptyChart />
         ) : (
@@ -92,7 +94,9 @@ export function DashboardCharts({
 
       <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
         <h3 className="mb-1 text-sm font-semibold text-zinc-800">Expenses by Category</h3>
-        <p className="mb-4 text-xs text-zinc-500">Where money is going</p>
+        <p className="mb-4 text-xs text-zinc-500">
+          Operating expenses by category (Selling, Overhead, Unclassified)
+        </p>
         {!charts.expensesByCategory.length ? (
           <EmptyChart />
         ) : (

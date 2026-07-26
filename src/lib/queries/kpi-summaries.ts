@@ -4,6 +4,36 @@ import type { DateFilterPreset } from '@/lib/dates'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
 import type { KpiSummary, KpiType } from '@/lib/types/kpi'
 
+/** Dev-time checks so operating-expense KPI popup never mixes PRODUCTION totals. */
+export function validateOperatingExpenseKpi(input: {
+  total: number
+  transactionCount: number
+  highestTransactionAmount: number
+  categories: { name: string; amount: number; percent: number }[]
+}): { ok: boolean; messages: string[] } {
+  const messages: string[] = []
+  if (input.highestTransactionAmount - input.total > 0.005) {
+    messages.push(
+      `Highest transaction (${input.highestTransactionAmount}) exceeds operating expense total (${input.total}).`,
+    )
+  }
+  for (const category of input.categories) {
+    if (category.percent - 100 > 0.05) {
+      messages.push(`Category ${category.name} percent ${category.percent} exceeds 100%.`)
+    }
+  }
+  if (input.categories.length > 0 && input.total > 0) {
+    const percentTotal = input.categories.reduce((sum, category) => sum + category.percent, 0)
+    if (Math.abs(percentTotal - 100) > 0.15) {
+      messages.push(`Category percents total ${percentTotal.toFixed(2)}% (expected ~100%).`)
+    }
+  }
+  if (input.transactionCount < 0) {
+    messages.push('Transaction count cannot be negative.')
+  }
+  return { ok: messages.length === 0, messages }
+}
+
 function reportsHref(
   preset: DateFilterPreset,
   from?: string | null,
@@ -131,9 +161,19 @@ export function buildKpiSummaries(input: {
   const periodCount = input.cards.periodInvoiceCount
   const periodAvg = periodCount > 0 ? input.cards.monthSales / periodCount : 0
 
-  const expenseCount = input.periodExpenseRows.length
+  // Caller must pass operating expenses only (Selling + Overhead + Unclassified).
+  const operatingExpenseRows = input.periodExpenseRows
+  const operatingExpenseTotal = moneyNumber(
+    addMoney(...operatingExpenseRows.map((exp) => exp.amount)),
+  )
+  // Prefer the sum of the same rows used for counts/categories so popup never drifts.
+  const expenseKpiTotal =
+    Math.abs(operatingExpenseTotal - input.cards.monthExpenses) < 0.005
+      ? input.cards.monthExpenses
+      : operatingExpenseTotal
+  const expenseCount = operatingExpenseRows.length
   const expenseByCategory = new Map<string, number>()
-  for (const exp of input.periodExpenseRows) {
+  for (const exp of operatingExpenseRows) {
     const label = exp.category.name
     expenseByCategory.set(
       label,
@@ -144,14 +184,22 @@ export function buildKpiSummaries(input: {
     .map(([name, amount]) => ({
       name,
       amount,
-      percent:
-        input.cards.monthExpenses > 0 ? (amount / input.cards.monthExpenses) * 100 : 0,
+      percent: expenseKpiTotal > 0 ? (amount / expenseKpiTotal) * 100 : 0,
     }))
     .sort((a, b) => b.amount - a.amount)
   const highestCategory = topCategories[0]
-  const highestExpense = [...input.periodExpenseRows].sort(
+  const highestExpense = [...operatingExpenseRows].sort(
     (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
   )[0]
+  const expenseValidation = validateOperatingExpenseKpi({
+    total: expenseKpiTotal,
+    transactionCount: expenseCount,
+    highestTransactionAmount: highestExpense ? moneyNumber(highestExpense.amount) : 0,
+    categories: topCategories,
+  })
+  if (process.env.NODE_ENV !== 'production' && !expenseValidation.ok) {
+    console.warn('[dashboard] Operating expense KPI validation failed', expenseValidation.messages)
+  }
 
   const margin =
     input.periodSalesTotal > 0 ? (input.cards.netProfit / input.periodSalesTotal) * 100 : 0
@@ -256,14 +304,14 @@ export function buildKpiSummaries(input: {
       type: 'monthExpenses',
       title: input.expensesTitle,
       rangeLabel: input.periodLabel,
-      primaryValue: input.cards.monthExpenses,
+      primaryValue: expenseKpiTotal,
       rows: [
         { kind: 'count', label: 'Expense entries', value: expenseCount },
         {
           kind: 'text',
           label: 'Highest category',
           value: highestCategory
-            ? `${highestCategory.name} (${highestCategory.percent.toFixed(0)}%)`
+            ? `${highestCategory.name} (${highestCategory.percent.toFixed(2)}%)`
             : '—',
         },
         {
@@ -286,7 +334,7 @@ export function buildKpiSummaries(input: {
         },
       ],
       categories: topCategories.slice(0, 3),
-      emptyMessage: 'No expenses found for this period.',
+      emptyMessage: 'No operating expenses found for this period.',
       detailsHref: listHref(
         '/expenses',
         input.periodType,
@@ -304,7 +352,7 @@ export function buildKpiSummaries(input: {
       primaryTone: input.cards.netProfit >= 0 ? 'success' : 'danger',
       rows: [
         { kind: 'money', label: 'Total sales', value: input.periodSalesTotal },
-        { kind: 'money', label: 'Total expenses', value: input.cards.monthExpenses },
+        { kind: 'money', label: 'Operating expenses', value: expenseKpiTotal },
         {
           kind: 'money',
           label: input.cards.netProfit >= 0 ? 'Net profit' : 'Net loss',

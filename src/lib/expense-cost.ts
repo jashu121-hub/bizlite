@@ -25,6 +25,13 @@ export function expenseNeedsClassification(costType: ExpenseCostType | null | un
   return !costType
 }
 
+/** P&L operating expenses: Selling + Overhead + Unclassified. Excludes PRODUCTION / inventory / COGS. */
+export function isOperatingExpenseCostType(
+  costType: ExpenseCostType | null | undefined,
+): boolean {
+  return costType == null || costType === 'SELLING' || costType === 'OVERHEAD'
+}
+
 export function costTypeLabel(costType: ExpenseCostType | null | undefined): string {
   if (!costType) return 'Needs Classification'
   return COST_TYPES.find((item) => item.value === costType)?.label ?? costType
