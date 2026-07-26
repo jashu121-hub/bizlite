@@ -1,4 +1,5 @@
 import { ExpenseCategoryManager } from '@/components/settings/expense-categories/ExpenseCategoryManager'
+import { ResetBusinessDataCard } from '@/components/settings/reset-business-data'
 import { SettingsForm } from '@/components/settings/settings-form'
 import { PageHeader } from '@/components/shared/page-header'
 import { DEFAULT_CURRENCY } from '@/lib/constants'
@@ -28,6 +29,7 @@ export default async function SettingsPage() {
         initialCategories={categories}
         currency={profile.currency ?? DEFAULT_CURRENCY}
       />
+      <ResetBusinessDataCard />
     </div>
   )
 }

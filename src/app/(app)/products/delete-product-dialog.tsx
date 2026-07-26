@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -36,6 +37,7 @@ export function DeleteProductDialog({
   const [status, setStatus] = useState<{
     canDelete: boolean
     name: string
+    related: string[]
   } | null>(null)
 
   useEffect(() => {
@@ -51,7 +53,11 @@ export function DeleteProductDialog({
         onOpenChange(false)
         return
       }
-      setStatus({ canDelete: result.data.canDelete, name: result.data.name })
+      setStatus({
+        canDelete: result.data.canDelete,
+        name: result.data.name,
+        related: result.data.related ?? [],
+      })
     })
     return () => {
       cancelled = true
@@ -64,7 +70,9 @@ export function DeleteProductDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this product?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {status?.canDelete ? 'Delete this product?' : 'Cannot delete permanently'}
+          </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2 text-sm text-zinc-500">
               <p>
@@ -74,21 +82,40 @@ export function DeleteProductDialog({
                 <Skeleton className="h-12 w-full" />
               ) : status.canDelete ? (
                 <p>
-                  This product has no sales or stock history and can be permanently deleted. This
-                  cannot be undone.
+                  This product has no linked sales, stock movements, expenses or cost calculations
+                  and can be permanently deleted. This cannot be undone.
                 </p>
               ) : (
-                <p>
-                  This product has transaction history and cannot be permanently deleted. You can
-                  archive it instead. Archived products stay in historical invoices and reports, but
-                  will not appear in new sale product selection.
-                </p>
+                <div className="space-y-2">
+                  <p>
+                    This product still has linked records. Permanent deletion is blocked until those
+                    records are removed (for example via Settings → Reset Business Data).
+                  </p>
+                  <ul className="list-disc space-y-1 pl-5 text-zinc-700">
+                    {status.related.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                  <p className="text-xs">
+                    Archive keeps the product out of new sales while preserving history in reports.
+                  </p>
+                </div>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
           <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          {status && !status.canDelete ? (
+            <Button asChild variant="outline" disabled={pending}>
+              <Link
+                href={`/products/${product.id}`}
+                onClick={() => onOpenChange(false)}
+              >
+                View Related Transactions
+              </Link>
+            </Button>
+          ) : null}
           {status?.canDelete ? (
             <Button
               variant="destructive"
@@ -106,7 +133,7 @@ export function DeleteProductDialog({
                 })
               }
             >
-              {pending ? 'Deleting…' : 'Delete Product'}
+              {pending ? 'Deleting…' : 'Delete Permanently'}
             </Button>
           ) : (
             <Button

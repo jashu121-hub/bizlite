@@ -135,18 +135,40 @@ export async function getProductDeleteStatusAction(id: string) {
     const product = await prisma.product.findFirst({
       where: { id, userId: user.id },
       include: {
-        _count: { select: { saleItems: true, stockMovements: true } },
+        _count: {
+          select: {
+            saleItems: true,
+            stockMovements: true,
+            expenses: true,
+            costCalculations: true,
+          },
+        },
       },
     })
     if (!product) return fail('Product not found')
-    const hasHistory = product._count.saleItems > 0 || product._count.stockMovements > 0
+    const links = {
+      saleItems: product._count.saleItems,
+      stockMovements: product._count.stockMovements,
+      expenses: product._count.expenses,
+      costCalculations: product._count.costCalculations,
+    }
+    const hasHistory =
+      links.saleItems > 0 ||
+      links.stockMovements > 0 ||
+      links.expenses > 0 ||
+      links.costCalculations > 0
     return ok({
       id: product.id,
       name: product.name,
       isActive: product.isActive,
       canDelete: !hasHistory,
-      saleItems: product._count.saleItems,
-      stockMovements: product._count.stockMovements,
+      ...links,
+      related: [
+        links.saleItems > 0 ? `${links.saleItems} sale line(s)` : null,
+        links.stockMovements > 0 ? `${links.stockMovements} stock movement(s)` : null,
+        links.expenses > 0 ? `${links.expenses} expense(s)` : null,
+        links.costCalculations > 0 ? `${links.costCalculations} cost calculation(s)` : null,
+      ].filter(Boolean) as string[],
     })
   } catch (error) {
     console.error('getProductDeleteStatusAction', error)
@@ -159,12 +181,26 @@ export async function deleteProductAction(id: string) {
     const { user } = await requireProfile()
     const existing = await prisma.product.findFirst({
       where: { id, userId: user.id },
-      include: { _count: { select: { saleItems: true, stockMovements: true } } },
+      include: {
+        _count: {
+          select: {
+            saleItems: true,
+            stockMovements: true,
+            expenses: true,
+            costCalculations: true,
+          },
+        },
+      },
     })
     if (!existing) return fail('Product not found')
-    if (existing._count.saleItems > 0 || existing._count.stockMovements > 0) {
+    const linked =
+      existing._count.saleItems > 0 ||
+      existing._count.stockMovements > 0 ||
+      existing._count.expenses > 0 ||
+      existing._count.costCalculations > 0
+    if (linked) {
       return fail(
-        'This product has transaction history and cannot be permanently deleted. You can archive it instead.',
+        'This product has linked sales, stock movements, expenses or cost calculations and cannot be permanently deleted. Reset those transactions first, or archive the product.',
       )
     }
     await prisma.product.delete({ where: { id } })
