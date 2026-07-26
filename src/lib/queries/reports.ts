@@ -11,6 +11,7 @@ import { prismaDateFilter } from '@/lib/dates'
 import { prisma } from '@/lib/prisma'
 import { expenseNeedsClassification } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, percent, subMoney } from '@/lib/money'
+import { calculateSalesProfitability } from '@/lib/services/sales-profitability'
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIALLY_PAID', 'PENDING']
 
@@ -83,11 +84,14 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         balancePending: true,
         paymentStatus: true,
         customer: { select: { name: true } },
+        subtotal: true,
+        discount: true,
         items: {
           select: {
             productId: true,
             productName: true,
             quantity: true,
+            unitCost: true,
             lineTotal: true,
             lineCost: true,
             lineProfit: true,
@@ -142,37 +146,35 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     }),
   ])
 
-  const revenue = addMoney(...sales.map((sale) => sale.totalAmount))
-  const inventoryCogs = addMoney(...sales.map((sale) => sale.totalCost))
   const totalPaidSales = addMoney(...sales.map((sale) => sale.amountPaid))
   const totalExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
 
-  const productionMoney = addMoney(
-    ...expenses
-      .filter((expense) => expense.costType === 'PRODUCTION')
-      .map((expense) => expense.amount),
-  )
-  const sellingMoney = addMoney(
-    ...expenses
-      .filter((expense) => expense.costType === 'SELLING')
-      .map((expense) => expense.amount),
-  )
-  const overheadMoney = addMoney(
-    ...expenses
-      .filter((expense) => expense.costType === 'OVERHEAD')
-      .map((expense) => expense.amount),
-  )
-  const unclassifiedMoney = addMoney(
-    ...expenses
-      .filter((expense) => !expense.costType)
-      .map((expense) => expense.amount),
+  const productNameById = new Map(products.map((product) => [product.id, product.name]))
+  const profitability = calculateSalesProfitability(
+    sales.map((sale) => ({
+      id: sale.id,
+      paymentStatus: sale.paymentStatus,
+      subtotal: sale.subtotal,
+      discount: sale.discount,
+      totalAmount: sale.totalAmount,
+      items: sale.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+        lineTotal: item.lineTotal,
+        lineCost: item.lineCost,
+      })),
+    })),
+    expenses.map((expense) => ({
+      amount: expense.amount,
+      costType: expense.costType,
+    })),
+    { productNames: productNameById },
   )
 
-  // Gross / classified operating analysis
-  const grossProfit = subMoney(revenue, productionMoney)
-  const profitAfterSelling = subMoney(grossProfit, sellingMoney)
-  // Accounting net profit always deducts ALL expenses including unclassified
-  const netProfit = subMoney(revenue, totalExpensesMoney)
+  const revenue = money(profitability.salesRevenue)
+  const inventoryCogs = money(profitability.productionCost)
 
   const receivables = addMoney(
     ...outstandingSales.map((sale) => sale.balancePending),
@@ -231,40 +233,6 @@ export async function getReportsData(userId: string, params: DashboardDateParams
 
   const needsClassification = expenses.filter((expense) => expenseNeedsClassification(expense.costType))
 
-  const productNameById = new Map(products.map((product) => [product.id, product.name]))
-
-  const productPerformance = new Map<
-    string,
-    {
-      product: string
-      quantitySold: number
-      salesAmount: ReturnType<typeof money>
-      cost: ReturnType<typeof money>
-      grossProfit: ReturnType<typeof money>
-    }
-  >()
-  for (const sale of sales) {
-    for (const item of sale.items) {
-      const key = item.productId ?? item.productName
-      const currentName =
-        (item.productId ? productNameById.get(item.productId) : undefined) ?? item.productName
-      const row = productPerformance.get(key) ?? {
-        product: currentName,
-        quantitySold: 0,
-        salesAmount: money(0),
-        cost: money(0),
-        grossProfit: money(0),
-      }
-      // Prefer the live product name if the catalog was renamed after the sale
-      row.product = currentName
-      row.quantitySold += item.quantity
-      row.salesAmount = row.salesAmount.plus(item.lineTotal)
-      row.cost = row.cost.plus(item.lineCost)
-      row.grossProfit = row.grossProfit.plus(item.lineProfit)
-      productPerformance.set(key, row)
-    }
-  }
-
   const customerReceivables = new Map<
     string,
     {
@@ -293,28 +261,21 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     customerReceivables.set(sale.customerId, row)
   }
 
-  const salesRevenue = moneyNumber(revenue)
-  const hasRevenue = money(revenue).gt(0)
-  const netProfitNumber = moneyNumber(netProfit)
-  const grossProfitNumber = moneyNumber(grossProfit)
+  const salesRevenue = profitability.salesRevenue
+  const hasRevenue = salesRevenue > 0
+  const netProfitNumber = profitability.netProfit
+  const grossProfitNumber = profitability.grossProfit
 
-  const productRows = [...productPerformance.values()]
-    .map((row) => {
-      const salesAmount = moneyNumber(row.salesAmount)
-      const cost = moneyNumber(row.cost)
-      const gp = moneyNumber(row.grossProfit)
-      const margin = moneyNumber(percent(row.grossProfit, row.salesAmount))
-      return {
-        product: row.product,
-        quantitySold: row.quantitySold,
-        salesAmount,
-        cost,
-        grossProfit: gp,
-        margin,
-        status: productMarginStatus(gp, salesAmount, margin),
-      }
-    })
-    .sort((a, b) => b.salesAmount - a.salesAmount)
+  const productRows = profitability.productProfitability.map((row) => ({
+    product: row.productName,
+    productId: row.productId,
+    quantitySold: row.quantitySold,
+    salesAmount: row.sales,
+    cost: row.costOfGoodsSold,
+    grossProfit: row.grossProfit,
+    margin: row.margin,
+    status: productMarginStatus(row.grossProfit, row.sales, row.margin),
+  }))
 
   const receivableRows = [...customerReceivables.values()]
     .map((row) => {
@@ -348,7 +309,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       ? {
           id: 'unclassified',
           tone: 'warning' as const,
-          message: `${needsClassification.length} expense${needsClassification.length === 1 ? '' : 's'} require classification — ${moneyNumber(unclassifiedMoney).toFixed(2)}`,
+          message: `${needsClassification.length} expense${needsClassification.length === 1 ? '' : 's'} require classification — ${unclassified.total.toFixed(2)}`,
           href: '/expenses?needsClassification=1',
           tab: 'expenses' as const,
         }
@@ -414,14 +375,14 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     summary: {
       sales: salesRevenue,
       expenses: moneyNumber(totalExpensesMoney),
-      productionCost: production.total,
-      sellingCost: selling.total,
-      overheadCost: overhead.total,
-      unclassifiedCost: unclassified.total,
+      productionCost: profitability.productionCost,
+      sellingCost: profitability.sellingCost,
+      overheadCost: profitability.overheadCost,
+      unclassifiedCost: profitability.unclassifiedExpenses,
       grossProfit: grossProfitNumber,
       netProfit: netProfitNumber,
-      grossMargin: hasRevenue ? moneyNumber(percent(grossProfit, revenue)) : null,
-      netMargin: hasRevenue ? moneyNumber(percent(netProfit, revenue)) : null,
+      grossMargin: hasRevenue ? profitability.grossMargin : null,
+      netMargin: hasRevenue ? profitability.netMargin : null,
       customerReceivables: moneyNumber(receivables),
       receivablesCustomers: receivableRows.length,
       stockValue: moneyNumber(stockValue),
@@ -470,15 +431,17 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     },
     profit: {
       revenue: salesRevenue,
-      productionCost: production.total,
+      /** Inventory COGS from sale-line unit cost snapshots (not PRODUCTION expenses). */
+      productionCost: profitability.productionCost,
       grossProfit: grossProfitNumber,
-      sellingCost: selling.total,
-      profitAfterSelling: moneyNumber(profitAfterSelling),
-      overheadCost: overhead.total,
-      unclassifiedCost: unclassified.total,
+      sellingCost: profitability.sellingCost,
+      profitAfterSelling: profitability.profitAfterSellingCosts,
+      overheadCost: profitability.overheadCost,
+      /** Null-type + PRODUCTION-typed expenses (operating costs outside inventory COGS). */
+      unclassifiedCost: profitability.unclassifiedExpenses,
       netProfit: netProfitNumber,
-      grossMargin: hasRevenue ? moneyNumber(percent(grossProfit, revenue)) : null,
-      netMargin: hasRevenue ? moneyNumber(percent(netProfit, revenue)) : null,
+      grossMargin: hasRevenue ? profitability.grossMargin : null,
+      netMargin: hasRevenue ? profitability.netMargin : null,
       inventoryCogs: moneyNumber(inventoryCogs),
     },
     productPerformance: productRows,

@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "seed": "tsx prisma/seed.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -62,6 +64,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",
+    "vitest": "3.2.7",
     "webpack": "^5.109.0"
   }
 }

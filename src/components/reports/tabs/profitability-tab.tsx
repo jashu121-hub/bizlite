@@ -112,8 +112,9 @@ export function ProfitabilityTab({
           tone={p.netProfit >= 0 ? 'success' : 'danger'}
         />
         <p className="mt-3 text-xs text-zinc-500">
-          Accounting Net Profit = Sales Revenue − Total Expenses. Product cost in Product
-          Performance uses cost recorded at sale time.
+          Production Cost is Cost of Goods Sold from each sale line (quantity × unit cost saved at
+          sale time). Gross Profit = Sales Revenue − Production Cost. Net Profit = Gross Profit −
+          Selling − Overhead − Unclassified expenses. Product Profitability uses the same figures.
         </p>
       </section>
 
@@ -156,7 +157,7 @@ export function ProfitabilityTab({
               >
                 {money(row.grossProfit)}
               </span>,
-              `${row.margin.toFixed(1)}%`,
+              `${row.margin.toFixed(2)}%`,
             ],
           }))}
           emptyMessage="No product sales for this period."

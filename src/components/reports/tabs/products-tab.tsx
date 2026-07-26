@@ -85,7 +85,7 @@ export function ProductsTab({ data, currency }: { data: ReportsData; currency: s
               >
                 {money(row.grossProfit)}
               </span>,
-              `${row.margin.toFixed(1)}%`,
+              `${row.margin.toFixed(2)}%`,
               <StatusBadge key="st" status={row.status} />,
             ],
           }))}

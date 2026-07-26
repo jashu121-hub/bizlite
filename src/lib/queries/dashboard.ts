@@ -232,11 +232,12 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       }))
 
   const periodRevenue = periodSalesAgg.total
-  // Inventory gross (sales − product COGS) — used for product economics, not KPI net profit
+  // Gross profit = Sales − sale-line COGS (same basis as Reports Profit & Loss)
   const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodSalesAgg.cost))
-  // Accounting net profit matches Reports: Sales − Total Expenses
-  const periodNet = moneyNumber(subMoney(periodRevenue, periodExpenseTotal))
-  const prevNet = moneyNumber(subMoney(prevSales.total, prevExpenseTotal))
+  // Net profit = Gross Profit − all operating expenses (matches Reports)
+  const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
+  const prevGross = moneyNumber(subMoney(prevSales.total, prevSales.cost))
+  const prevNet = moneyNumber(subMoney(prevGross, prevExpenseTotal))
 
   const pendingPayments = moneyNumber(pendingAgg._sum.balancePending || 0)
   const stockValue = moneyNumber(

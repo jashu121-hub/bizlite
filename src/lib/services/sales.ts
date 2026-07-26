@@ -32,10 +32,13 @@ async function buildSaleLines(
   options?: {
     stockMap?: Map<string, number>
     productMap?: Map<string, Product>
+    /** Preserve sale-time unit cost snapshots when editing an existing sale. */
+    priorUnitCostByProductId?: Map<string, ReturnType<typeof money>>
   },
 ) {
   const stockMap = options?.stockMap
   const productMap = options?.productMap
+  const priorUnitCostByProductId = options?.priorUnitCostByProductId
   const lines = []
 
   for (const item of items) {
@@ -53,7 +56,10 @@ async function buildSaleLines(
     }
 
     const unitPrice = money(item.unitSellingPrice)
-    const unitCost = money(product.costPrice)
+    // Historical protection: keep the original sale-line cost when editing.
+    // New products on the sale snapshot the current catalog cost.
+    const priorCost = priorUnitCostByProductId?.get(product.id)
+    const unitCost = priorCost ?? money(product.costPrice)
     const lineTotal = mulMoney(unitPrice, item.quantity)
     const lineCost = mulMoney(unitCost, item.quantity)
     const lineProfit = subMoney(lineTotal, lineCost)
@@ -251,7 +257,17 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       ]),
     )
 
-    const lines = await buildSaleLines(userId, input.items, tx, { stockMap, productMap })
+    const priorUnitCostByProductId = new Map<string, ReturnType<typeof money>>()
+    for (const item of existing.items) {
+      if (!item.productId || priorUnitCostByProductId.has(item.productId)) continue
+      priorUnitCostByProductId.set(item.productId, money(item.unitCost))
+    }
+
+    const lines = await buildSaleLines(userId, input.items, tx, {
+      stockMap,
+      productMap,
+      priorUnitCostByProductId,
+    })
     const totals = totalsFromLines(lines, input.discount)
 
     const extraPaid = existing.payments
