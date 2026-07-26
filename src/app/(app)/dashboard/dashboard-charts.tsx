@@ -1,6 +1,5 @@
 'use client'
 
-import * as React from 'react'
 import {
   Bar,
   BarChart,
@@ -16,7 +15,6 @@ import {
   YAxis,
 } from 'recharts'
 import { formatCurrency } from '@/lib/money'
-import { cn } from '@/lib/utils'
 
 type Row = { name: string; value: number }
 
@@ -31,26 +29,13 @@ export function DashboardCharts({
     dailyNet: { name: string; value: number; sales?: number; expenses?: number }[]
     profitTrendGrouping?: 'day' | 'month' | 'year'
     expensesByCategory: Row[]
-    expensesByCategoryOperating?: Row[]
-    expensesByCategoryAll?: Row[]
-    operatingExpensesTotal?: number
-    allSpendingTotal?: number
-    productionCostTotal?: number
+    totalCost?: number
   }
   currency: string
 }) {
-  const [spendView, setSpendView] = React.useState<'operating' | 'all'>('operating')
   const money = (value: number) => formatCurrency(value, currency)
-
-  const operatingRows = charts.expensesByCategoryOperating ?? charts.expensesByCategory
-  const allRows = charts.expensesByCategoryAll ?? charts.expensesByCategory
-  const categoryRows = spendView === 'operating' ? operatingRows : allRows
   const expenseTotal =
-    spendView === 'operating'
-      ? (charts.operatingExpensesTotal ??
-        categoryRows.reduce((sum, row) => sum + row.value, 0))
-      : (charts.allSpendingTotal ?? categoryRows.reduce((sum, row) => sum + row.value, 0))
-
+    charts.totalCost ?? charts.expensesByCategory.reduce((sum, row) => sum + row.value, 0)
   const trendLabel =
     charts.profitTrendGrouping === 'year'
       ? 'Yearly net profit trend'
@@ -61,9 +46,9 @@ export function DashboardCharts({
   return (
     <section className="grid gap-4 xl:grid-cols-3">
       <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
-        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Sales vs Expenses</h3>
+        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Sales vs Total Cost</h3>
         <p className="mb-4 text-xs text-zinc-500">
-          Operating expenses only (excludes production / inventory purchases)
+          Sales compared with production and operating costs
         </p>
         {charts.salesVsExpenses.every((r) => !r.value) ? (
           <EmptyChart />
@@ -110,61 +95,23 @@ export function DashboardCharts({
       </div>
 
       <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-zinc-800">Expenses by Category</h3>
-            <p className="mt-1 text-xs text-zinc-500">
-              {spendView === 'operating'
-                ? 'Operating expenses (Selling, Overhead, Unclassified)'
-                : 'All cash spending (includes Production Cost)'}
-            </p>
-          </div>
-          <div
-            className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5"
-            role="group"
-            aria-label="Expense category view"
-          >
-            <button
-              type="button"
-              onClick={() => setSpendView('operating')}
-              className={cn(
-                'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
-                spendView === 'operating'
-                  ? 'bg-white text-teal-800 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700',
-              )}
-            >
-              Operating
-            </button>
-            <button
-              type="button"
-              onClick={() => setSpendView('all')}
-              className={cn(
-                'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
-                spendView === 'all'
-                  ? 'bg-white text-teal-800 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700',
-              )}
-            >
-              All Spending
-            </button>
-          </div>
-        </div>
-        {!categoryRows.length ? (
+        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Total Cost by Category</h3>
+        <p className="mb-4 text-xs text-zinc-500">Production and operating costs</p>
+        {!charts.expensesByCategory.length ? (
           <EmptyChart />
         ) : (
           <div className="relative">
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie
-                  data={categoryRows}
+                  data={charts.expensesByCategory}
                   dataKey="value"
                   nameKey="name"
                   innerRadius={58}
                   outerRadius={86}
                   paddingAngle={2}
                 >
-                  {categoryRows.map((row, index) => (
+                  {charts.expensesByCategory.map((row, index) => (
                     <Cell key={row.name} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -179,9 +126,9 @@ export function DashboardCharts({
             </div>
           </div>
         )}
-        {categoryRows.length > 0 ? (
+        {charts.expensesByCategory.length > 0 ? (
           <ul className="mt-2 space-y-1.5">
-            {categoryRows.slice(0, 5).map((row, index) => {
+            {charts.expensesByCategory.slice(0, 5).map((row, index) => {
               const pct = expenseTotal ? (row.value / expenseTotal) * 100 : 0
               return (
                 <li key={row.name} className="flex items-center justify-between gap-2 text-xs">

@@ -87,7 +87,7 @@ export function DashboardKpiCards({
 
   return (
     <>
-      <section className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 snap-x snap-mandatory md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
         {items.map((kpi) => (
           <button
             key={kpi.type}
@@ -107,7 +107,7 @@ export function DashboardKpiCards({
             aria-label={`View summary for ${kpi.label}`}
             title={kpi.tooltip ?? undefined}
             className={cn(
-              'min-w-[168px] shrink-0 snap-start rounded-2xl border border-zinc-200/80 bg-white p-4 text-left shadow-sm outline-none transition md:min-w-0',
+              'flex h-full min-h-[132px] flex-col rounded-2xl border border-zinc-200/80 bg-white p-4 text-left shadow-sm outline-none transition',
               'cursor-pointer hover:-translate-y-0.5 hover:border-teal-300/80 hover:shadow-md',
               'focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2',
               activeType === kpi.type && 'border-teal-300 shadow-md',
@@ -148,11 +148,13 @@ export function DashboardKpiCards({
             {kpi.subtitle ? (
               <p className="mt-1 text-[11px] leading-snug text-zinc-500">{kpi.subtitle}</p>
             ) : null}
-            {kpi.isCount && kpi.ok ? (
-              <p className="mt-2 text-xs font-medium text-emerald-600">All good! 🎉</p>
-            ) : (
-              <Trend value={kpi.trend} />
-            )}
+            <div className="mt-auto">
+              {kpi.isCount && kpi.ok ? (
+                <p className="mt-2 text-xs font-medium text-emerald-600">All good! 🎉</p>
+              ) : (
+                <Trend value={kpi.trend} />
+              )}
+            </div>
           </button>
         ))}
       </section>

@@ -1,37 +1,31 @@
+import type { ExpenseCostType } from '@prisma/client'
 import { format, startOfDay } from 'date-fns'
-import { addMoney, money, moneyNumber, type MoneyInput } from '@/lib/money'
+
+import {
+  computeDashboardTotalCost,
+  dashboardCostTypeLabel,
+  type DashboardCostExpenseRow,
+} from '@/lib/dashboard-total-cost'
 import type { DateFilterPreset } from '@/lib/dates'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
+import { addMoney, money, moneyNumber, type MoneyInput } from '@/lib/money'
 import type { KpiSummary, KpiType } from '@/lib/types/kpi'
 
-/** Dev-time checks so operating-expense KPI popup never mixes PRODUCTION totals. */
+export { validateDashboardTotalCost } from '@/lib/dashboard-total-cost'
+
+/** @deprecated Use validateDashboardTotalCost */
 export function validateOperatingExpenseKpi(input: {
   total: number
   transactionCount: number
   highestTransactionAmount: number
   categories: { name: string; amount: number; percent: number }[]
 }): { ok: boolean; messages: string[] } {
-  const messages: string[] = []
-  if (input.highestTransactionAmount - input.total > 0.005) {
-    messages.push(
-      `Highest transaction (${input.highestTransactionAmount}) exceeds operating expense total (${input.total}).`,
-    )
+  return {
+    ok:
+      input.highestTransactionAmount - input.total <= 0.005 &&
+      input.categories.every((c) => c.percent - 100 <= 0.05),
+    messages: [],
   }
-  for (const category of input.categories) {
-    if (category.percent - 100 > 0.05) {
-      messages.push(`Category ${category.name} percent ${category.percent} exceeds 100%.`)
-    }
-  }
-  if (input.categories.length > 0 && input.total > 0) {
-    const percentTotal = input.categories.reduce((sum, category) => sum + category.percent, 0)
-    if (Math.abs(percentTotal - 100) > 0.15) {
-      messages.push(`Category percents total ${percentTotal.toFixed(2)}% (expected ~100%).`)
-    }
-  }
-  if (input.transactionCount < 0) {
-    messages.push('Transaction count cannot be negative.')
-  }
-  return { ok: messages.length === 0, messages }
 }
 
 function reportsHref(
@@ -60,7 +54,6 @@ function listHref(
   to?: string | null,
   year?: number,
   month?: number,
-  extras?: { costType?: 'PRODUCTION' | 'SELLING' | 'OVERHEAD' },
 ) {
   const sp = new URLSearchParams()
   sp.set('preset', preset)
@@ -71,29 +64,7 @@ function listHref(
     if (year) sp.set('year', String(year))
     if (preset === 'month' && month) sp.set('month', String(month))
   }
-  if (extras?.costType) sp.set('costType', extras.costType)
   return `${base}?${sp.toString()}`
-}
-
-function categoryShares(
-  rows: ExpenseRow[],
-  total: number,
-): { name: string; amount: number; percent: number }[] {
-  const byCategory = new Map<string, number>()
-  for (const exp of rows) {
-    const label = exp.category.name
-    byCategory.set(
-      label,
-      moneyNumber(money(byCategory.get(label) || 0).plus(money(exp.amount))),
-    )
-  }
-  return [...byCategory.entries()]
-    .map(([name, amount]) => ({
-      name,
-      amount,
-      percent: total > 0 ? (amount / total) * 100 : 0,
-    }))
-    .sort((a, b) => b.amount - a.amount)
 }
 
 function comparisonTone(
@@ -119,6 +90,7 @@ type ExpenseRow = {
   id: string
   date: Date
   amount: MoneyInput
+  costType: ExpenseCostType | null
   category: { name: string }
   description: string
 }
@@ -134,18 +106,16 @@ type ProductRow = {
 export function buildKpiSummaries(input: {
   todaySalesRows: SaleRow[]
   periodSalesRows: SaleRow[]
-  /** Operating expenses only (Selling + Overhead + Unclassified). */
-  periodExpenseRows: ExpenseRow[]
-  /** Production cost expense rows only (costType PRODUCTION). */
-  productionExpenseRows: ExpenseRow[]
+  /** All period cost expense rows (Production + Selling + Overhead + Unclassified). */
+  totalCostExpenseRows: ExpenseRow[]
+  /** Operating expenses only — used for Net Profit disclosure, not Total Cost. */
+  operatingExpenseTotal: number
   pendingSalesAll: SaleRow[]
   products: ProductRow[]
   cards: {
     todaySales: number
     monthSales: number
-    monthExpenses: number
-    productionCost: number
-    periodCogs: number
+    totalCost: number
     netProfit: number
     pendingPayments: number
     stockValue: number
@@ -156,21 +126,16 @@ export function buildKpiSummaries(input: {
     trends: {
       todaySales: PeriodComparison
       monthSales: PeriodComparison
-      monthExpenses: PeriodComparison
-      productionCost: PeriodComparison
+      totalCost: PeriodComparison
       netProfit: PeriodComparison
     }
   }
   periodSalesTotal: number
-  prevPeriodSalesTotal: number
-  prevPeriodExpensesTotal: number
-  prevPeriodNet: number
   periodLabel: string
   firstCardTitle: string
   firstCardRangeLabel: string
   salesTitle: string
-  expensesTitle: string
-  productionCostTitle: string
+  totalCostTitle: string
   isTodayFirstCard: boolean
   periodType: DateFilterPreset
   customFrom?: string | null
@@ -191,45 +156,17 @@ export function buildKpiSummaries(input: {
   const periodCount = input.cards.periodInvoiceCount
   const periodAvg = periodCount > 0 ? input.cards.monthSales / periodCount : 0
 
-  // Caller must pass operating expenses only (Selling + Overhead + Unclassified).
-  const operatingExpenseRows = input.periodExpenseRows
-  const operatingExpenseTotal = moneyNumber(
-    addMoney(...operatingExpenseRows.map((exp) => exp.amount)),
+  const totalCostResult = computeDashboardTotalCost(
+    input.totalCostExpenseRows as DashboardCostExpenseRow[],
   )
-  // Prefer the sum of the same rows used for counts/categories so popup never drifts.
-  const expenseKpiTotal =
-    Math.abs(operatingExpenseTotal - input.cards.monthExpenses) < 0.005
-      ? input.cards.monthExpenses
-      : operatingExpenseTotal
-  const expenseCount = operatingExpenseRows.length
-  const topCategories = categoryShares(operatingExpenseRows, expenseKpiTotal)
-  const highestCategory = topCategories[0]
-  const highestExpense = [...operatingExpenseRows].sort(
-    (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
-  )[0]
-  const expenseValidation = validateOperatingExpenseKpi({
-    total: expenseKpiTotal,
-    transactionCount: expenseCount,
-    highestTransactionAmount: highestExpense ? moneyNumber(highestExpense.amount) : 0,
-    categories: topCategories,
-  })
-  if (process.env.NODE_ENV !== 'production' && !expenseValidation.ok) {
-    console.warn('[dashboard] Operating expense KPI validation failed', expenseValidation.messages)
-  }
+  const totalCost =
+    Math.abs(totalCostResult.totalCost - input.cards.totalCost) < 0.005
+      ? input.cards.totalCost
+      : totalCostResult.totalCost
 
-  const productionRows = input.productionExpenseRows
-  const productionTotalFromRows = moneyNumber(
-    addMoney(...productionRows.map((exp) => exp.amount)),
-  )
-  const productionKpiTotal =
-    Math.abs(productionTotalFromRows - input.cards.productionCost) < 0.005
-      ? input.cards.productionCost
-      : productionTotalFromRows
-  const productionCategories = categoryShares(productionRows, productionKpiTotal)
-  const highestProductionCategory = productionCategories[0]
-  const highestProductionExpense = [...productionRows].sort(
-    (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
-  )[0]
+  if (process.env.NODE_ENV !== 'production' && !totalCostResult.validation.ok) {
+    console.warn('[dashboard] Total Cost KPI validation failed', totalCostResult.validation.messages)
+  }
 
   const margin =
     input.periodSalesTotal > 0 ? (input.cards.netProfit / input.periodSalesTotal) * 100 : 0
@@ -330,95 +267,76 @@ export function buildKpiSummaries(input: {
         input.month,
       ),
     },
-    productionCost: {
-      type: 'productionCost',
-      title: input.productionCostTitle,
+    totalCost: {
+      type: 'totalCost',
+      title: input.totalCostTitle,
       rangeLabel: input.periodLabel,
-      primaryValue: productionKpiTotal,
+      primaryValue: totalCost,
       rows: [
-        { kind: 'count', label: 'Production entries', value: productionRows.length },
+        { kind: 'count', label: 'Total entries', value: totalCostResult.entryCount },
         {
           kind: 'text',
           label: 'Highest category',
-          value: highestProductionCategory
-            ? `${highestProductionCategory.name} — ${highestProductionCategory.percent.toFixed(2)}%`
+          value: totalCostResult.highestCategory
+            ? `${totalCostResult.highestCategory.name} — ${totalCostResult.highestCategory.percent.toFixed(2)}%`
             : '—',
         },
         {
           kind: 'text',
           label: 'Highest transaction',
-          value: highestProductionExpense
-            ? `${highestProductionExpense.description} — ${format(highestProductionExpense.date, 'dd MMM yyyy')}`
+          value: totalCostResult.highestTransaction
+            ? `${totalCostResult.highestTransaction.description} — ${format(totalCostResult.highestTransaction.date, 'dd MMM yyyy')}`
             : '—',
         },
         {
           kind: 'money',
           label: 'Highest transaction amount',
-          value: highestProductionExpense
-            ? moneyNumber(highestProductionExpense.amount)
+          value: totalCostResult.highestTransaction
+            ? moneyNumber(totalCostResult.highestTransaction.amount)
             : 0,
         },
         {
-          kind: 'money',
-          label: 'Period COGS (products sold)',
-          value: input.cards.periodCogs,
-        },
-        {
           kind: 'text',
           label: 'vs previous period',
-          value: input.cards.trends.productionCost.label,
-          tone: comparisonTone(input.cards.trends.productionCost),
+          value: input.cards.trends.totalCost.label,
+          tone: comparisonTone(input.cards.trends.totalCost),
         },
       ],
-      categories: productionCategories.slice(0, 5),
-      categoriesTitle: 'Production categories',
-      emptyMessage: 'No production cost entries found for this period.',
-      detailsHref: listHref(
-        '/expenses',
-        input.periodType,
-        input.customFrom,
-        input.customTo,
-        input.year,
-        input.month,
-        { costType: 'PRODUCTION' },
-      ),
-    },
-    monthExpenses: {
-      type: 'monthExpenses',
-      title: input.expensesTitle,
-      rangeLabel: input.periodLabel,
-      primaryValue: expenseKpiTotal,
-      rows: [
-        { kind: 'count', label: 'Expense entries', value: expenseCount },
+      sections: [
         {
-          kind: 'text',
-          label: 'Highest category',
-          value: highestCategory
-            ? `${highestCategory.name} (${highestCategory.percent.toFixed(2)}%)`
-            : '—',
+          id: 'by-cost-type',
+          title: 'By Cost Type',
+          defaultOpen: true,
+          categories: totalCostResult.byCostType.map((row) => ({
+            name: row.name,
+            amount: row.amount,
+            percent: row.percent,
+          })),
         },
         {
-          kind: 'text',
-          label: 'Highest transaction',
-          value: highestExpense
-            ? `${highestExpense.description} · ${format(highestExpense.date, 'dd MMM')}`
-            : '—',
+          id: 'by-category',
+          title: 'By Expense Category',
+          defaultOpen: true,
+          categories: totalCostResult.byCategory.map((row) => ({
+            name: row.name,
+            amount: row.amount,
+            percent: row.percent,
+          })),
         },
         {
-          kind: 'money',
-          label: 'Highest transaction amount',
-          value: highestExpense ? moneyNumber(highestExpense.amount) : 0,
-        },
-        {
-          kind: 'text',
-          label: 'vs previous period',
-          value: input.cards.trends.monthExpenses.label,
-          tone: comparisonTone(input.cards.trends.monthExpenses),
+          id: 'recent-entries',
+          title: 'Recent Cost Entries',
+          defaultOpen: false,
+          listItems: totalCostResult.recentEntries.map((row) => ({
+            id: row.id,
+            primary: row.description || row.category.name,
+            secondary: `${dashboardCostTypeLabel(row.costType)} · ${row.category.name}`,
+            amount: moneyNumber(row.amount),
+            meta: format(row.date, 'dd MMM yyyy'),
+          })),
         },
       ],
-      categories: topCategories.slice(0, 3),
-      categoriesTitle: 'Top categories',
-      emptyMessage: 'No operating expenses found for this period.',
+      emptyMessage: 'No cost entries found for this period.',
       detailsHref: listHref(
         '/expenses',
         input.periodType,
@@ -436,7 +354,11 @@ export function buildKpiSummaries(input: {
       primaryTone: input.cards.netProfit >= 0 ? 'success' : 'danger',
       rows: [
         { kind: 'money', label: 'Total sales', value: input.periodSalesTotal },
-        { kind: 'money', label: 'Operating expenses', value: expenseKpiTotal },
+        {
+          kind: 'money',
+          label: 'Operating expenses',
+          value: input.operatingExpenseTotal,
+        },
         {
           kind: 'money',
           label: input.cards.netProfit >= 0 ? 'Net profit' : 'Net loss',

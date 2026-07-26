@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  buildKpiSummaries,
-  validateOperatingExpenseKpi,
-} from '@/lib/queries/kpi-summaries'
+import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
 
 const neutralTrend: PeriodComparison = {
@@ -12,146 +9,94 @@ const neutralTrend: PeriodComparison = {
   favourable: null,
 }
 
-function baseInput(options: {
-  operating: {
-    id: string
-    date: Date
-    amount: string
-    category: { name: string }
-    description: string
-  }[]
-  production: {
-    id: string
-    date: Date
-    amount: string
-    category: { name: string }
-    description: string
-  }[]
-  periodCogs?: number
-}) {
-  const operatingTotal = options.operating.reduce((sum, row) => sum + Number(row.amount), 0)
-  const productionTotal = options.production.reduce((sum, row) => sum + Number(row.amount), 0)
-  return {
-    todaySalesRows: [],
-    periodSalesRows: [],
-    periodExpenseRows: options.operating,
-    productionExpenseRows: options.production,
-    pendingSalesAll: [],
-    products: [],
-    cards: {
-      todaySales: 0,
-      monthSales: 1000,
-      monthExpenses: operatingTotal,
-      productionCost: productionTotal,
-      periodCogs: options.periodCogs ?? 375,
-      netProfit: 825,
-      pendingPayments: 0,
-      stockValue: 0,
-      lowStockCount: 0,
-      periodPaid: 1000,
-      periodPending: 0,
-      periodInvoiceCount: 1,
-      trends: {
-        todaySales: neutralTrend,
-        monthSales: neutralTrend,
-        monthExpenses: neutralTrend,
-        productionCost: neutralTrend,
-        netProfit: neutralTrend,
+describe('total cost KPI summary', () => {
+  it('builds a combined Total Cost popup from all cost entries', () => {
+    const summary = buildKpiSummaries({
+      todaySalesRows: [],
+      periodSalesRows: [],
+      totalCostExpenseRows: [
+        {
+          id: '1',
+          date: new Date(2026, 6, 25),
+          amount: '300.00',
+          costType: 'PRODUCTION',
+          category: { name: 'Materials' },
+          description: 'materials',
+        },
+        {
+          id: '2',
+          date: new Date(2026, 6, 25),
+          amount: '100.00',
+          costType: 'SELLING',
+          category: { name: 'Customer Delivery' },
+          description: 'Transportation',
+        },
+        {
+          id: '3',
+          date: new Date(2026, 6, 20),
+          amount: '75.00',
+          costType: 'OVERHEAD',
+          category: { name: 'Salary' },
+          description: 'Wages',
+        },
+      ],
+      operatingExpenseTotal: 175,
+      pendingSalesAll: [],
+      products: [],
+      cards: {
+        todaySales: 0,
+        monthSales: 700,
+        totalCost: 475,
+        netProfit: 150,
+        pendingPayments: 0,
+        stockValue: 0,
+        lowStockCount: 0,
+        periodPaid: 700,
+        periodPending: 0,
+        periodInvoiceCount: 1,
+        trends: {
+          todaySales: neutralTrend,
+          monthSales: neutralTrend,
+          totalCost: neutralTrend,
+          netProfit: neutralTrend,
+        },
       },
-    },
-    periodSalesTotal: 1000,
-    prevPeriodSalesTotal: 0,
-    prevPeriodExpensesTotal: 0,
-    prevPeriodNet: 0,
-    periodLabel: 'July 2026',
-    firstCardTitle: "Today's Sales",
-    firstCardRangeLabel: '25 Jul 2026',
-    salesTitle: 'This Month Sales',
-    expensesTitle: 'This Month Operating Expenses',
-    productionCostTitle: 'This Month Production Cost',
-    isTodayFirstCard: true,
-    periodType: 'month' as const,
-    year: 2026,
-    month: 7,
-  }
-}
+      periodSalesTotal: 700,
+      periodLabel: 'July 2026',
+      firstCardTitle: "Today's Sales",
+      firstCardRangeLabel: '25 Jul 2026',
+      salesTitle: 'This Month Sales',
+      totalCostTitle: 'This Month Total Cost',
+      isTodayFirstCard: true,
+      periodType: 'month',
+      year: 2026,
+      month: 7,
+    }).totalCost
 
-describe('operating expense KPI summary', () => {
-  it('uses only operating expense rows for totals, counts, and percentages', () => {
-    const summaries = buildKpiSummaries(
-      baseInput({
-        operating: [
-          {
-            id: 'e1',
-            date: new Date(2026, 6, 25),
-            amount: '100.00',
-            category: { name: 'Customer Delivery' },
-            description: 'Transportation',
-          },
-          {
-            id: 'e2',
-            date: new Date(2026, 6, 20),
-            amount: '75.00',
-            category: { name: 'Salary' },
-            description: 'July salary',
-          },
-        ],
-        production: [
-          {
-            id: 'p1',
-            date: new Date(2026, 6, 25),
-            amount: '300.00',
-            category: { name: 'Materials' },
-            description: 'materials',
-          },
-        ],
-      }),
+    expect(summary.title).toBe('This Month Total Cost')
+    expect(summary.primaryValue).toBe(475)
+    expect(summary.rows.find((row) => row.label === 'Total entries')?.value).toBe(3)
+    expect(summary.rows.find((row) => row.label === 'Highest category')?.value).toBe(
+      'Materials — 63.16%',
     )
-
-    const operating = summaries.monthExpenses
-    expect(operating.title).toBe('This Month Operating Expenses')
-    expect(operating.primaryValue).toBe(175)
-    expect(operating.rows.find((row) => row.label === 'Expense entries')?.value).toBe(2)
-    expect(operating.categories).toEqual([
-      { name: 'Customer Delivery', amount: 100, percent: expect.closeTo(57.14, 2) },
-      { name: 'Salary', amount: 75, percent: expect.closeTo(42.86, 2) },
-    ])
-
-    const production = summaries.productionCost
-    expect(production.title).toBe('This Month Production Cost')
-    expect(production.primaryValue).toBe(300)
-    expect(production.rows.find((row) => row.label === 'Production entries')?.value).toBe(1)
-    expect(production.rows.find((row) => row.label === 'Highest category')?.value).toBe(
-      'Materials — 100.00%',
-    )
-    expect(production.rows.find((row) => row.label === 'Highest transaction')?.value).toBe(
+    expect(summary.rows.find((row) => row.label === 'Highest transaction')?.value).toBe(
       'materials — 25 Jul 2026',
     )
-    expect(
-      production.rows.find((row) => row.label === 'Highest transaction amount')?.value,
-    ).toBe(300)
-    expect(production.rows.find((row) => row.label === 'Period COGS (products sold)')?.value).toBe(
-      375,
+    expect(summary.rows.find((row) => row.label === 'Highest transaction amount')?.value).toBe(
+      300,
     )
-    expect(production.categories).toEqual([
-      { name: 'Materials', amount: 300, percent: 100 },
+    expect(summary.sections?.map((section) => section.id)).toEqual([
+      'by-cost-type',
+      'by-category',
+      'recent-entries',
     ])
-    expect(production.detailsHref).toContain('costType=PRODUCTION')
-    expect(production.detailsHref).toContain('preset=month')
-  })
-
-  it('fails validation when highest transaction exceeds operating total', () => {
-    const result = validateOperatingExpenseKpi({
-      total: 175,
-      transactionCount: 3,
-      highestTransactionAmount: 300,
-      categories: [
-        { name: 'Materials', amount: 300, percent: 171.43 },
-        { name: 'Customer Delivery', amount: 100, percent: 57.14 },
-        { name: 'Salary', amount: 75, percent: 42.86 },
-      ],
-    })
-    expect(result.ok).toBe(false)
-    expect(result.messages.some((message) => message.includes('exceeds'))).toBe(true)
+    const byType = summary.sections?.find((section) => section.id === 'by-cost-type')?.categories
+    expect(byType?.find((row) => row.name === 'Production Cost')?.amount).toBe(300)
+    expect(byType?.find((row) => row.name === 'Selling Cost')?.percent).toBeCloseTo(21.05, 2)
+    const recent = summary.sections?.find((section) => section.id === 'recent-entries')?.listItems
+    expect(recent?.[0]?.primary).toBe('materials')
+    expect(recent?.[0]?.secondary).toContain('Production Cost')
+    expect(summary.detailsHref).toContain('/expenses?preset=month')
+    expect(summary.detailsHref).not.toContain('costType=')
   })
 })

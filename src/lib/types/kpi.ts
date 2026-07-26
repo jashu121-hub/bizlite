@@ -1,8 +1,7 @@
 export type KpiType =
   | 'todaySales'
   | 'monthSales'
-  | 'productionCost'
-  | 'monthExpenses'
+  | 'totalCost'
   | 'netProfit'
   | 'pendingPayments'
   | 'stockValue'
@@ -29,6 +28,14 @@ export type KpiCategoryShare = {
   percent: number
 }
 
+export type KpiExpandableSection = {
+  id: string
+  title: string
+  defaultOpen?: boolean
+  categories?: KpiCategoryShare[]
+  listItems?: KpiListItem[]
+}
+
 export type KpiSummary = {
   type: KpiType
   title: string
@@ -39,6 +46,7 @@ export type KpiSummary = {
   rows: KpiRow[]
   categories?: KpiCategoryShare[]
   categoriesTitle?: string
+  sections?: KpiExpandableSection[]
   listTitle?: string
   listItems?: KpiListItem[]
   emptyMessage: string

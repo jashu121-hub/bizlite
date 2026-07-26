@@ -1,7 +1,8 @@
 'use client'
 
+import * as React from 'react'
 import Link from 'next/link'
-import { ArrowRight, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, X } from 'lucide-react'
 
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { KpiSummary } from '@/lib/types/kpi'
+import type { KpiExpandableSection, KpiSummary } from '@/lib/types/kpi'
 import { cn } from '@/lib/utils'
 
 const toneClass = {
@@ -29,6 +30,95 @@ type Props = {
   summary: KpiSummary | null
   currency: string
   loading?: boolean
+}
+
+function ExpandableSection({
+  section,
+  currency,
+}: {
+  section: KpiExpandableSection
+  currency: string
+}) {
+  const [open, setOpen] = React.useState(Boolean(section.defaultOpen))
+  const hasContent =
+    (section.categories && section.categories.length > 0) ||
+    (section.listItems && section.listItems.length > 0)
+
+  return (
+    <div className="rounded-xl border border-zinc-200">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          {section.title}
+        </span>
+        <ChevronDown
+          className={cn('h-4 w-4 text-zinc-400 transition', open && 'rotate-180')}
+        />
+      </button>
+      {open ? (
+        <div className="border-t border-zinc-100 px-3 py-2.5">
+          {!hasContent ? (
+            <p className="py-2 text-center text-xs text-zinc-400">No items</p>
+          ) : null}
+          {section.categories && section.categories.length > 0 ? (
+            <ul className="space-y-2">
+              {section.categories.map((cat) => (
+                <li
+                  key={cat.name}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0 truncate font-medium text-zinc-800">
+                    {cat.name}
+                    <span className="ml-1.5 text-xs font-normal text-zinc-400">
+                      {cat.percent.toFixed(2)}%
+                    </span>
+                  </span>
+                  <CurrencyDisplay
+                    value={cat.amount}
+                    currency={currency}
+                    className="shrink-0 font-semibold"
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {section.listItems && section.listItems.length > 0 ? (
+            <ul className={cn('space-y-2', section.categories?.length ? 'mt-2' : undefined)}>
+              {section.listItems.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-zinc-800">{item.primary}</p>
+                    {item.secondary ? (
+                      <p className="truncate text-xs text-zinc-500">{item.secondary}</p>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {item.amount !== undefined ? (
+                      <CurrencyDisplay
+                        value={item.amount}
+                        currency={currency}
+                        className="text-sm font-semibold"
+                      />
+                    ) : null}
+                    {item.meta ? (
+                      <p className="text-[11px] text-zinc-400">{item.meta}</p>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export function KpiSummaryModal({ open, onOpenChange, summary, currency, loading }: Props) {
@@ -89,7 +179,8 @@ export function KpiSummaryModal({ open, onOpenChange, summary, currency, loading
             <div className="max-h-[min(50vh,420px)] overflow-x-hidden overflow-y-auto px-5 py-4">
               {summary.rows.length === 0 &&
               (!summary.listItems || summary.listItems.length === 0) &&
-              (!summary.categories || summary.categories.length === 0) ? (
+              (!summary.categories || summary.categories.length === 0) &&
+              (!summary.sections || summary.sections.length === 0) ? (
                 <p className="py-8 text-center text-sm text-zinc-400">{summary.emptyMessage}</p>
               ) : (
                 <div className="space-y-4">
@@ -117,6 +208,18 @@ export function KpiSummaryModal({ open, onOpenChange, summary, currency, loading
                       </div>
                     ))}
                   </dl>
+
+                  {summary.sections && summary.sections.length > 0 ? (
+                    <div className="space-y-2">
+                      {summary.sections.map((section) => (
+                        <ExpandableSection
+                          key={section.id}
+                          section={section}
+                          currency={currency}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
 
                   {summary.categories && summary.categories.length > 0 ? (
                     <div>

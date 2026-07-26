@@ -19,8 +19,9 @@ import {
   toLocalDateInput,
   type DashboardDateParams,
 } from '@/lib/dashboard-date-range'
+import { computeDashboardTotalCost } from '@/lib/dashboard-total-cost'
 import { isOperatingExpenseCostType } from '@/lib/expense-cost'
-import { addMoney, money, moneyNumber, subMoney, type MoneyInput } from '@/lib/money'
+import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
 async function sumSales(
@@ -86,22 +87,6 @@ async function sumProductionExpenses(userId: string, from: Date | null, to: Date
     select: { amount: true },
   })
   return moneyNumber(addMoney(...rows.map((row) => row.amount)))
-}
-
-function categoryChartRows(
-  rows: { amount: MoneyInput; category: { name: string } }[],
-): { name: string; value: number }[] {
-  const byCategory = new Map<string, number>()
-  for (const exp of rows) {
-    const label = exp.category.name
-    byCategory.set(
-      label,
-      moneyNumber(money(byCategory.get(label) || 0).plus(money(exp.amount ?? 0))),
-    )
-  }
-  return [...byCategory.entries()]
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
 }
 
 const saleSummarySelect = {
@@ -301,15 +286,14 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const operatingExpenseRows = periodExpenses.filter((expense) =>
     isOperatingExpenseCostType(expense.costType),
   )
-  const productionExpenseRows = periodExpenses.filter(
-    (expense) => expense.costType === 'PRODUCTION',
-  )
-  const allSpendingRows = [...operatingExpenseRows, ...productionExpenseRows]
-  const totalCashSpending = moneyNumber(
-    addMoney(periodExpenseTotal, periodProductionCost),
-  )
-  const expensesByCategoryOperating = categoryChartRows(operatingExpenseRows)
-  const expensesByCategoryAll = categoryChartRows(allSpendingRows)
+  // Shared Total Cost dataset for KPI, popup, and cost charts (includes Production).
+  const totalCostResult = computeDashboardTotalCost(periodExpenses)
+  const periodTotalCost = totalCostResult.totalCost
+  const prevPeriodTotalCost = moneyNumber(addMoney(prevExpenseTotal, prevProductionCost))
+  const totalCostByCategory = totalCostResult.byCategory.map((row) => ({
+    name: row.name,
+    value: row.amount,
+  }))
 
   const chartStart = startOfDay(effectiveStart ?? todayStart)
   const chartEnd = startOfDay(effectiveEnd > new Date() ? new Date() : effectiveEnd)
@@ -323,10 +307,10 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const profitTrend = intervals.map((point) => {
     const key = bucketKey(point, grouping)
     const daySales = periodSales.filter((s) => bucketKey(s.date, grouping) === key)
+    // Net trend still uses operating expenses so P&L is not mixed with Total Cost.
     const dayExpenses = operatingExpenseRows.filter((e) => bucketKey(e.date, grouping) === key)
     const sales = addMoney(...daySales.map((s) => s.totalAmount))
     const expenses = addMoney(...dayExpenses.map((e) => e.amount))
-    // Chart profit approximates sales − operating expenses (COGS excluded from this series)
     return {
       name: bucketLabel(point, grouping),
       value: moneyNumber(subMoney(sales, expenses)),
@@ -342,29 +326,22 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const salesComparison = comparePeriodValues(periodRevenue, lifetime ? null : prevSales.total, {
     lifetime,
   })
-  const expensesComparison = comparePeriodValues(
-    periodExpenseTotal,
-    lifetime ? null : prevExpenseTotal,
-    { lifetime, invertFavourable: true },
-  )
-  const productionComparison = comparePeriodValues(
-    periodProductionCost,
-    lifetime ? null : prevProductionCost,
+  const totalCostComparison = comparePeriodValues(
+    periodTotalCost,
+    lifetime ? null : prevPeriodTotalCost,
     { lifetime, invertFavourable: true },
   )
   const netComparison = comparePeriodValues(periodNet, lifetime ? null : prevNet, { lifetime })
 
   const firstCardValue = isCurrentMonthView ? resolvedTodaySales.total : periodSalesAgg.paid
   const firstCardLabel = isCurrentMonthView ? "Today's Sales" : 'Paid Amount'
-  const periodCogs = periodSalesAgg.cost
 
   const cards = {
     todaySales: firstCardValue,
     monthSales: periodRevenue,
+    totalCost: periodTotalCost,
     monthExpenses: periodExpenseTotal,
     productionCost: periodProductionCost,
-    totalCashSpending,
-    periodCogs,
     grossProfit: periodGross,
     netProfit: periodNet,
     pendingPayments,
@@ -381,14 +358,13 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       firstCard: firstCardLabel,
       sales: dashboardRange.salesLabel,
       expenses: dashboardRange.expensesLabel,
-      productionCost: dashboardRange.productionCostLabel,
+      totalCost: dashboardRange.totalCostLabel,
       period: dashboardRange.displayLabel,
     },
     trends: {
       todaySales: todayComparison,
       monthSales: salesComparison,
-      monthExpenses: expensesComparison,
-      productionCost: productionComparison,
+      totalCost: totalCostComparison,
       netProfit: netComparison,
     },
     showStockAsCurrent: dashboardRange.showStockAsCurrent,
@@ -397,17 +373,14 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const kpiSummaries = buildKpiSummaries({
     todaySalesRows,
     periodSalesRows: periodSales,
-    // Same operating-expense set as KPI total, charts, and comparisons
-    periodExpenseRows: operatingExpenseRows,
-    productionExpenseRows,
+    totalCostExpenseRows: periodExpenses,
+    operatingExpenseTotal: periodExpenseTotal,
     pendingSalesAll,
     products,
     cards: {
       todaySales: firstCardValue,
       monthSales: periodRevenue,
-      monthExpenses: periodExpenseTotal,
-      productionCost: periodProductionCost,
-      periodCogs,
+      totalCost: periodTotalCost,
       netProfit: periodNet,
       pendingPayments,
       stockValue,
@@ -418,23 +391,18 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       trends: {
         todaySales: todayComparison,
         monthSales: salesComparison,
-        monthExpenses: expensesComparison,
-        productionCost: productionComparison,
+        totalCost: totalCostComparison,
         netProfit: netComparison,
       },
     },
     periodSalesTotal: periodRevenue,
-    prevPeriodSalesTotal: prevSales.total,
-    prevPeriodExpensesTotal: prevExpenseTotal,
-    prevPeriodNet: prevNet,
     periodLabel: dashboardRange.displayLabel,
     firstCardTitle: firstCardLabel,
     firstCardRangeLabel: isCurrentMonthView
       ? format(new Date(), 'dd MMM yyyy')
       : dashboardRange.displayLabel,
     salesTitle: dashboardRange.salesLabel,
-    expensesTitle: dashboardRange.expensesLabel,
-    productionCostTitle: dashboardRange.productionCostLabel,
+    totalCostTitle: dashboardRange.totalCostLabel,
     isTodayFirstCard: isCurrentMonthView,
     periodType: dashboardRange.periodType,
     customFrom: dashboardRange.customFrom,
@@ -465,16 +433,12 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     charts: {
       salesVsExpenses: [
         { name: 'Sales', value: periodRevenue },
-        { name: 'Operating Expenses', value: periodExpenseTotal },
+        { name: 'Total Cost', value: periodTotalCost },
       ],
       dailyNet: profitTrend,
       profitTrendGrouping: grouping,
-      expensesByCategory: expensesByCategoryOperating,
-      expensesByCategoryOperating,
-      expensesByCategoryAll,
-      operatingExpensesTotal: periodExpenseTotal,
-      allSpendingTotal: totalCashSpending,
-      productionCostTotal: periodProductionCost,
+      expensesByCategory: totalCostByCategory,
+      totalCost: periodTotalCost,
     },
   }
 }
