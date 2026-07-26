@@ -1,13 +1,21 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
+import type { ExpenseCostType } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
 import { PAGE_SIZE } from '@/lib/constants'
 import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { ExpenseList } from './expense-list'
-import { getDateRange, prismaDateFilter, type DateFilterPreset } from '@/lib/dates'
+import { type DateFilterPreset } from '@/lib/dates'
+import {
+  getDashboardDateRange,
+  toDashboardDateRangeCompat,
+} from '@/lib/dashboard-date-range'
+import { prismaDateFilter } from '@/lib/dates'
 import { listExpenseCategories } from '@/lib/expense-categories'
+
+const COST_TYPES = new Set<ExpenseCostType>(['PRODUCTION', 'SELLING', 'OVERHEAD'])
 
 export default async function ExpensesPage({
   searchParams,
@@ -21,10 +29,25 @@ export default async function ExpensesPage({
   const category = value('category')
   const page = Math.max(1, Number(value('page')) || 1)
   const preset = (value('preset') as DateFilterPreset) || undefined
-  const range = preset ? getDateRange(preset, value('from'), value('to')) : null
-  const dateFilter = range ? prismaDateFilter(range) : undefined
-
+  const costTypeParam = value('costType')
+  const costType =
+    costTypeParam && COST_TYPES.has(costTypeParam as ExpenseCostType)
+      ? (costTypeParam as ExpenseCostType)
+      : undefined
   const needsClassification = value('needsClassification') === '1'
+
+  const dashboardRange = preset
+    ? getDashboardDateRange({
+        preset,
+        from: value('from'),
+        to: value('to'),
+        year: value('year'),
+        month: value('month'),
+      })
+    : null
+  const dateFilter = dashboardRange
+    ? prismaDateFilter(toDashboardDateRangeCompat(dashboardRange))
+    : undefined
 
   const where = {
     userId: user.id,
@@ -33,7 +56,9 @@ export default async function ExpensesPage({
     ...(dateFilter ? { date: dateFilter } : {}),
     ...(needsClassification
       ? { costType: null }
-      : {}),
+      : costType
+        ? { costType }
+        : {}),
   }
 
   const [expenses, total, categories] = await Promise.all([
@@ -52,7 +77,11 @@ export default async function ExpensesPage({
     <div className="space-y-6">
       <PageHeader
         title="Expenses"
-        description="Track your business spending."
+        description={
+          costType === 'PRODUCTION'
+            ? 'Production Cost entries for the selected period.'
+            : 'Track your business spending.'
+        }
         actions={
           <Button asChild>
             <Link href="/expenses/new">

@@ -77,10 +77,21 @@ export default async function DashboardPage({
       summary: data.kpiSummaries.monthSales,
     },
     {
+      type: 'productionCost' as const,
+      label: data.cards.labels.productionCost,
+      value: data.cards.productionCost,
+      trend: data.cards.trends.productionCost,
+      subtitle: 'Materials and direct production spending',
+      tooltip:
+        'Production-related spending entered during the selected period. This may differ from COGS, which represents the cost of products sold.',
+      summary: data.kpiSummaries.productionCost,
+    },
+    {
       type: 'monthExpenses' as const,
       label: data.cards.labels.expenses,
       value: data.cards.monthExpenses,
       trend: data.cards.trends.monthExpenses,
+      subtitle: 'Selling, overhead, and unclassified',
       summary: data.kpiSummaries.monthExpenses,
     },
     {

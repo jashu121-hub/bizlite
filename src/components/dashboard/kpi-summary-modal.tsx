@@ -121,7 +121,7 @@ export function KpiSummaryModal({ open, onOpenChange, summary, currency, loading
                   {summary.categories && summary.categories.length > 0 ? (
                     <div>
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                        Top categories
+                        {summary.categoriesTitle ?? 'Top categories'}
                       </p>
                       <ul className="space-y-2">
                         {summary.categories.map((cat) => (

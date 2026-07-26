@@ -20,7 +20,7 @@ import {
   type DashboardDateParams,
 } from '@/lib/dashboard-date-range'
 import { isOperatingExpenseCostType } from '@/lib/expense-cost'
-import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
+import { addMoney, money, moneyNumber, subMoney, type MoneyInput } from '@/lib/money'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
 async function sumSales(
@@ -52,14 +52,17 @@ async function sumSales(
   }
 }
 
+function expenseDateFilter(from: Date | null, to: Date | null) {
+  return from || to
+    ? {
+        ...(from ? { gte: from } : {}),
+        ...(to ? { lte: to } : {}),
+      }
+    : undefined
+}
+
 async function sumOperatingExpenses(userId: string, from: Date | null, to: Date | null): Promise<number> {
-  const date =
-    from || to
-      ? {
-          ...(from ? { gte: from } : {}),
-          ...(to ? { lte: to } : {}),
-        }
-      : undefined
+  const date = expenseDateFilter(from, to)
   const rows = await prisma.expense.findMany({
     where: {
       userId,
@@ -70,6 +73,35 @@ async function sumOperatingExpenses(userId: string, from: Date | null, to: Date 
     select: { amount: true },
   })
   return moneyNumber(addMoney(...rows.map((row) => row.amount)))
+}
+
+async function sumProductionExpenses(userId: string, from: Date | null, to: Date | null): Promise<number> {
+  const date = expenseDateFilter(from, to)
+  const rows = await prisma.expense.findMany({
+    where: {
+      userId,
+      ...(date ? { date } : {}),
+      costType: 'PRODUCTION',
+    },
+    select: { amount: true },
+  })
+  return moneyNumber(addMoney(...rows.map((row) => row.amount)))
+}
+
+function categoryChartRows(
+  rows: { amount: MoneyInput; category: { name: string } }[],
+): { name: string; value: number }[] {
+  const byCategory = new Map<string, number>()
+  for (const exp of rows) {
+    const label = exp.category.name
+    byCategory.set(
+      label,
+      moneyNumber(money(byCategory.get(label) || 0).plus(money(exp.amount ?? 0))),
+    )
+  }
+  return [...byCategory.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
 }
 
 const saleSummarySelect = {
@@ -141,8 +173,10 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const [
     periodSalesAgg,
     periodExpenseTotal,
+    periodProductionCost,
     prevSales,
     prevExpenseTotal,
+    prevProductionCost,
     todaySales,
     yesterdaySales,
     periodSales,
@@ -154,11 +188,19 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   ] = await Promise.all([
     sumSales(userId, dashboardRange.startDate, dashboardRange.endDate),
     sumOperatingExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
+    sumProductionExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
     dashboardRange.previousStartDate && dashboardRange.previousEndDate
       ? sumSales(userId, dashboardRange.previousStartDate, dashboardRange.previousEndDate)
       : Promise.resolve(emptySalesAgg),
     dashboardRange.previousStartDate && dashboardRange.previousEndDate
       ? sumOperatingExpenses(
+          userId,
+          dashboardRange.previousStartDate,
+          dashboardRange.previousEndDate,
+        )
+      : Promise.resolve(0),
+    dashboardRange.previousStartDate && dashboardRange.previousEndDate
+      ? sumProductionExpenses(
           userId,
           dashboardRange.previousStartDate,
           dashboardRange.previousEndDate,
@@ -259,14 +301,15 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const operatingExpenseRows = periodExpenses.filter((expense) =>
     isOperatingExpenseCostType(expense.costType),
   )
-  const expenseByCategory = new Map<string, number>()
-  for (const exp of operatingExpenseRows) {
-    const label = exp.category.name
-    expenseByCategory.set(
-      label,
-      moneyNumber(money(expenseByCategory.get(label) || 0).plus(exp.amount)),
-    )
-  }
+  const productionExpenseRows = periodExpenses.filter(
+    (expense) => expense.costType === 'PRODUCTION',
+  )
+  const allSpendingRows = [...operatingExpenseRows, ...productionExpenseRows]
+  const totalCashSpending = moneyNumber(
+    addMoney(periodExpenseTotal, periodProductionCost),
+  )
+  const expensesByCategoryOperating = categoryChartRows(operatingExpenseRows)
+  const expensesByCategoryAll = categoryChartRows(allSpendingRows)
 
   const chartStart = startOfDay(effectiveStart ?? todayStart)
   const chartEnd = startOfDay(effectiveEnd > new Date() ? new Date() : effectiveEnd)
@@ -304,15 +347,24 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     lifetime ? null : prevExpenseTotal,
     { lifetime, invertFavourable: true },
   )
+  const productionComparison = comparePeriodValues(
+    periodProductionCost,
+    lifetime ? null : prevProductionCost,
+    { lifetime, invertFavourable: true },
+  )
   const netComparison = comparePeriodValues(periodNet, lifetime ? null : prevNet, { lifetime })
 
   const firstCardValue = isCurrentMonthView ? resolvedTodaySales.total : periodSalesAgg.paid
   const firstCardLabel = isCurrentMonthView ? "Today's Sales" : 'Paid Amount'
+  const periodCogs = periodSalesAgg.cost
 
   const cards = {
     todaySales: firstCardValue,
     monthSales: periodRevenue,
     monthExpenses: periodExpenseTotal,
+    productionCost: periodProductionCost,
+    totalCashSpending,
+    periodCogs,
     grossProfit: periodGross,
     netProfit: periodNet,
     pendingPayments,
@@ -329,12 +381,14 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       firstCard: firstCardLabel,
       sales: dashboardRange.salesLabel,
       expenses: dashboardRange.expensesLabel,
+      productionCost: dashboardRange.productionCostLabel,
       period: dashboardRange.displayLabel,
     },
     trends: {
       todaySales: todayComparison,
       monthSales: salesComparison,
       monthExpenses: expensesComparison,
+      productionCost: productionComparison,
       netProfit: netComparison,
     },
     showStockAsCurrent: dashboardRange.showStockAsCurrent,
@@ -345,12 +399,15 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     periodSalesRows: periodSales,
     // Same operating-expense set as KPI total, charts, and comparisons
     periodExpenseRows: operatingExpenseRows,
+    productionExpenseRows,
     pendingSalesAll,
     products,
     cards: {
       todaySales: firstCardValue,
       monthSales: periodRevenue,
       monthExpenses: periodExpenseTotal,
+      productionCost: periodProductionCost,
+      periodCogs,
       netProfit: periodNet,
       pendingPayments,
       stockValue,
@@ -362,6 +419,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         todaySales: todayComparison,
         monthSales: salesComparison,
         monthExpenses: expensesComparison,
+        productionCost: productionComparison,
         netProfit: netComparison,
       },
     },
@@ -376,6 +434,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       : dashboardRange.displayLabel,
     salesTitle: dashboardRange.salesLabel,
     expensesTitle: dashboardRange.expensesLabel,
+    productionCostTitle: dashboardRange.productionCostLabel,
     isTodayFirstCard: isCurrentMonthView,
     periodType: dashboardRange.periodType,
     customFrom: dashboardRange.customFrom,
@@ -410,9 +469,12 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       ],
       dailyNet: profitTrend,
       profitTrendGrouping: grouping,
-      expensesByCategory: [...expenseByCategory.entries()]
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value),
+      expensesByCategory: expensesByCategoryOperating,
+      expensesByCategoryOperating,
+      expensesByCategoryAll,
+      operatingExpensesTotal: periodExpenseTotal,
+      allSpendingTotal: totalCashSpending,
+      productionCostTotal: periodProductionCost,
     },
   }
 }

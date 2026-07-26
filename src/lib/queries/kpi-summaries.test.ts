@@ -12,24 +12,38 @@ const neutralTrend: PeriodComparison = {
   favourable: null,
 }
 
-function baseInput(expenseRows: {
-  id: string
-  date: Date
-  amount: string
-  category: { name: string }
-  description: string
-}[]) {
-  const total = expenseRows.reduce((sum, row) => sum + Number(row.amount), 0)
+function baseInput(options: {
+  operating: {
+    id: string
+    date: Date
+    amount: string
+    category: { name: string }
+    description: string
+  }[]
+  production: {
+    id: string
+    date: Date
+    amount: string
+    category: { name: string }
+    description: string
+  }[]
+  periodCogs?: number
+}) {
+  const operatingTotal = options.operating.reduce((sum, row) => sum + Number(row.amount), 0)
+  const productionTotal = options.production.reduce((sum, row) => sum + Number(row.amount), 0)
   return {
     todaySalesRows: [],
     periodSalesRows: [],
-    periodExpenseRows: expenseRows,
+    periodExpenseRows: options.operating,
+    productionExpenseRows: options.production,
     pendingSalesAll: [],
     products: [],
     cards: {
       todaySales: 0,
       monthSales: 1000,
-      monthExpenses: total,
+      monthExpenses: operatingTotal,
+      productionCost: productionTotal,
+      periodCogs: options.periodCogs ?? 375,
       netProfit: 825,
       pendingPayments: 0,
       stockValue: 0,
@@ -41,6 +55,7 @@ function baseInput(expenseRows: {
         todaySales: neutralTrend,
         monthSales: neutralTrend,
         monthExpenses: neutralTrend,
+        productionCost: neutralTrend,
         netProfit: neutralTrend,
       },
     },
@@ -53,6 +68,7 @@ function baseInput(expenseRows: {
     firstCardRangeLabel: '25 Jul 2026',
     salesTitle: 'This Month Sales',
     expensesTitle: 'This Month Operating Expenses',
+    productionCostTitle: 'This Month Production Cost',
     isTodayFirstCard: true,
     periodType: 'month' as const,
     year: 2026,
@@ -62,43 +78,66 @@ function baseInput(expenseRows: {
 
 describe('operating expense KPI summary', () => {
   it('uses only operating expense rows for totals, counts, and percentages', () => {
-    const summary = buildKpiSummaries(
-      baseInput([
-        {
-          id: 'e1',
-          date: new Date(2026, 6, 25),
-          amount: '100.00',
-          category: { name: 'Customer Delivery' },
-          description: 'Transportation',
-        },
-        {
-          id: 'e2',
-          date: new Date(2026, 6, 20),
-          amount: '75.00',
-          category: { name: 'Salary' },
-          description: 'July salary',
-        },
-      ]),
-    ).monthExpenses
+    const summaries = buildKpiSummaries(
+      baseInput({
+        operating: [
+          {
+            id: 'e1',
+            date: new Date(2026, 6, 25),
+            amount: '100.00',
+            category: { name: 'Customer Delivery' },
+            description: 'Transportation',
+          },
+          {
+            id: 'e2',
+            date: new Date(2026, 6, 20),
+            amount: '75.00',
+            category: { name: 'Salary' },
+            description: 'July salary',
+          },
+        ],
+        production: [
+          {
+            id: 'p1',
+            date: new Date(2026, 6, 25),
+            amount: '300.00',
+            category: { name: 'Materials' },
+            description: 'materials',
+          },
+        ],
+      }),
+    )
 
-    expect(summary.title).toBe('This Month Operating Expenses')
-    expect(summary.primaryValue).toBe(175)
-    expect(summary.rows.find((row) => row.label === 'Expense entries')?.value).toBe(2)
-    expect(summary.rows.find((row) => row.label === 'Highest category')?.value).toBe(
-      'Customer Delivery (57.14%)',
-    )
-    expect(summary.rows.find((row) => row.label === 'Highest transaction')?.value).toBe(
-      'Transportation · 25 Jul',
-    )
-    expect(summary.rows.find((row) => row.label === 'Highest transaction amount')?.value).toBe(
-      100,
-    )
-    expect(summary.categories).toEqual([
+    const operating = summaries.monthExpenses
+    expect(operating.title).toBe('This Month Operating Expenses')
+    expect(operating.primaryValue).toBe(175)
+    expect(operating.rows.find((row) => row.label === 'Expense entries')?.value).toBe(2)
+    expect(operating.categories).toEqual([
       { name: 'Customer Delivery', amount: 100, percent: expect.closeTo(57.14, 2) },
       { name: 'Salary', amount: 75, percent: expect.closeTo(42.86, 2) },
     ])
-    const percentTotal = summary.categories!.reduce((sum, cat) => sum + cat.percent, 0)
-    expect(percentTotal).toBeCloseTo(100, 1)
+
+    const production = summaries.productionCost
+    expect(production.title).toBe('This Month Production Cost')
+    expect(production.primaryValue).toBe(300)
+    expect(production.rows.find((row) => row.label === 'Production entries')?.value).toBe(1)
+    expect(production.rows.find((row) => row.label === 'Highest category')?.value).toBe(
+      'Materials — 100.00%',
+    )
+    expect(production.rows.find((row) => row.label === 'Highest transaction')?.value).toBe(
+      'materials — 25 Jul 2026',
+    )
+    expect(
+      production.rows.find((row) => row.label === 'Highest transaction amount')?.value,
+    ).toBe(300)
+    expect(production.rows.find((row) => row.label === 'Period COGS (products sold)')?.value).toBe(
+      375,
+    )
+    expect(production.categories).toEqual([
+      { name: 'Materials', amount: 300, percent: 100 },
+    ])
+    expect(production.detailsHref).toContain('costType=PRODUCTION')
+    expect(production.detailsHref).toContain('preset=month')
   })
 
   it('fails validation when highest transaction exceeds operating total', () => {

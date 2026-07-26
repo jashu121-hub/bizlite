@@ -1,6 +1,7 @@
 export type KpiType =
   | 'todaySales'
   | 'monthSales'
+  | 'productionCost'
   | 'monthExpenses'
   | 'netProfit'
   | 'pendingPayments'
@@ -37,6 +38,7 @@ export type KpiSummary = {
   primaryTone?: 'default' | 'success' | 'danger' | 'warning'
   rows: KpiRow[]
   categories?: KpiCategoryShare[]
+  categoriesTitle?: string
   listTitle?: string
   listItems?: KpiListItem[]
   emptyMessage: string

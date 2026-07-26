@@ -60,6 +60,7 @@ function listHref(
   to?: string | null,
   year?: number,
   month?: number,
+  extras?: { costType?: 'PRODUCTION' | 'SELLING' | 'OVERHEAD' },
 ) {
   const sp = new URLSearchParams()
   sp.set('preset', preset)
@@ -70,7 +71,29 @@ function listHref(
     if (year) sp.set('year', String(year))
     if (preset === 'month' && month) sp.set('month', String(month))
   }
+  if (extras?.costType) sp.set('costType', extras.costType)
   return `${base}?${sp.toString()}`
+}
+
+function categoryShares(
+  rows: ExpenseRow[],
+  total: number,
+): { name: string; amount: number; percent: number }[] {
+  const byCategory = new Map<string, number>()
+  for (const exp of rows) {
+    const label = exp.category.name
+    byCategory.set(
+      label,
+      moneyNumber(money(byCategory.get(label) || 0).plus(money(exp.amount))),
+    )
+  }
+  return [...byCategory.entries()]
+    .map(([name, amount]) => ({
+      name,
+      amount,
+      percent: total > 0 ? (amount / total) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount)
 }
 
 function comparisonTone(
@@ -111,13 +134,18 @@ type ProductRow = {
 export function buildKpiSummaries(input: {
   todaySalesRows: SaleRow[]
   periodSalesRows: SaleRow[]
+  /** Operating expenses only (Selling + Overhead + Unclassified). */
   periodExpenseRows: ExpenseRow[]
+  /** Production cost expense rows only (costType PRODUCTION). */
+  productionExpenseRows: ExpenseRow[]
   pendingSalesAll: SaleRow[]
   products: ProductRow[]
   cards: {
     todaySales: number
     monthSales: number
     monthExpenses: number
+    productionCost: number
+    periodCogs: number
     netProfit: number
     pendingPayments: number
     stockValue: number
@@ -129,6 +157,7 @@ export function buildKpiSummaries(input: {
       todaySales: PeriodComparison
       monthSales: PeriodComparison
       monthExpenses: PeriodComparison
+      productionCost: PeriodComparison
       netProfit: PeriodComparison
     }
   }
@@ -141,6 +170,7 @@ export function buildKpiSummaries(input: {
   firstCardRangeLabel: string
   salesTitle: string
   expensesTitle: string
+  productionCostTitle: string
   isTodayFirstCard: boolean
   periodType: DateFilterPreset
   customFrom?: string | null
@@ -172,21 +202,7 @@ export function buildKpiSummaries(input: {
       ? input.cards.monthExpenses
       : operatingExpenseTotal
   const expenseCount = operatingExpenseRows.length
-  const expenseByCategory = new Map<string, number>()
-  for (const exp of operatingExpenseRows) {
-    const label = exp.category.name
-    expenseByCategory.set(
-      label,
-      moneyNumber(money(expenseByCategory.get(label) || 0).plus(money(exp.amount))),
-    )
-  }
-  const topCategories = [...expenseByCategory.entries()]
-    .map(([name, amount]) => ({
-      name,
-      amount,
-      percent: expenseKpiTotal > 0 ? (amount / expenseKpiTotal) * 100 : 0,
-    }))
-    .sort((a, b) => b.amount - a.amount)
+  const topCategories = categoryShares(operatingExpenseRows, expenseKpiTotal)
   const highestCategory = topCategories[0]
   const highestExpense = [...operatingExpenseRows].sort(
     (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
@@ -200,6 +216,20 @@ export function buildKpiSummaries(input: {
   if (process.env.NODE_ENV !== 'production' && !expenseValidation.ok) {
     console.warn('[dashboard] Operating expense KPI validation failed', expenseValidation.messages)
   }
+
+  const productionRows = input.productionExpenseRows
+  const productionTotalFromRows = moneyNumber(
+    addMoney(...productionRows.map((exp) => exp.amount)),
+  )
+  const productionKpiTotal =
+    Math.abs(productionTotalFromRows - input.cards.productionCost) < 0.005
+      ? input.cards.productionCost
+      : productionTotalFromRows
+  const productionCategories = categoryShares(productionRows, productionKpiTotal)
+  const highestProductionCategory = productionCategories[0]
+  const highestProductionExpense = [...productionRows].sort(
+    (a, b) => moneyNumber(b.amount) - moneyNumber(a.amount),
+  )[0]
 
   const margin =
     input.periodSalesTotal > 0 ? (input.cards.netProfit / input.periodSalesTotal) * 100 : 0
@@ -300,6 +330,59 @@ export function buildKpiSummaries(input: {
         input.month,
       ),
     },
+    productionCost: {
+      type: 'productionCost',
+      title: input.productionCostTitle,
+      rangeLabel: input.periodLabel,
+      primaryValue: productionKpiTotal,
+      rows: [
+        { kind: 'count', label: 'Production entries', value: productionRows.length },
+        {
+          kind: 'text',
+          label: 'Highest category',
+          value: highestProductionCategory
+            ? `${highestProductionCategory.name} — ${highestProductionCategory.percent.toFixed(2)}%`
+            : '—',
+        },
+        {
+          kind: 'text',
+          label: 'Highest transaction',
+          value: highestProductionExpense
+            ? `${highestProductionExpense.description} — ${format(highestProductionExpense.date, 'dd MMM yyyy')}`
+            : '—',
+        },
+        {
+          kind: 'money',
+          label: 'Highest transaction amount',
+          value: highestProductionExpense
+            ? moneyNumber(highestProductionExpense.amount)
+            : 0,
+        },
+        {
+          kind: 'money',
+          label: 'Period COGS (products sold)',
+          value: input.cards.periodCogs,
+        },
+        {
+          kind: 'text',
+          label: 'vs previous period',
+          value: input.cards.trends.productionCost.label,
+          tone: comparisonTone(input.cards.trends.productionCost),
+        },
+      ],
+      categories: productionCategories.slice(0, 5),
+      categoriesTitle: 'Production categories',
+      emptyMessage: 'No production cost entries found for this period.',
+      detailsHref: listHref(
+        '/expenses',
+        input.periodType,
+        input.customFrom,
+        input.customTo,
+        input.year,
+        input.month,
+        { costType: 'PRODUCTION' },
+      ),
+    },
     monthExpenses: {
       type: 'monthExpenses',
       title: input.expensesTitle,
@@ -334,6 +417,7 @@ export function buildKpiSummaries(input: {
         },
       ],
       categories: topCategories.slice(0, 3),
+      categoriesTitle: 'Top categories',
       emptyMessage: 'No operating expenses found for this period.',
       detailsHref: listHref(
         '/expenses',

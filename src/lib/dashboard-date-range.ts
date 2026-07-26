@@ -25,6 +25,7 @@ export type DashboardDateRange = {
   displayLabel: string
   salesLabel: string
   expensesLabel: string
+  productionCostLabel: string
   reference: Date
   year: number
   month: number
@@ -92,9 +93,14 @@ export function formatDashboardPeriodLabel(
 
 export function formatPeriodMetricLabel(
   periodType: DateFilterPreset,
-  metric: 'sales' | 'expenses',
+  metric: 'sales' | 'expenses' | 'production',
 ): string {
-  const suffix = metric === 'sales' ? 'Sales' : 'Operating Expenses'
+  const suffix =
+    metric === 'sales'
+      ? 'Sales'
+      : metric === 'production'
+        ? 'Production Cost'
+        : 'Operating Expenses'
   switch (periodType) {
     case 'month':
       return `This Month ${suffix}`
@@ -234,6 +240,7 @@ export function getDashboardDateRange(
     ),
     salesLabel: formatPeriodMetricLabel(periodType, 'sales'),
     expensesLabel: formatPeriodMetricLabel(periodType, 'expenses'),
+    productionCostLabel: formatPeriodMetricLabel(periodType, 'production'),
     reference,
     year: reference.getFullYear(),
     month: reference.getMonth() + 1,
