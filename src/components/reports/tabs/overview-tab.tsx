@@ -54,12 +54,28 @@ export function OverviewTab({
 }) {
   const money = (value: number) => formatCurrency(value, currency)
   const p = data.profit
+  const enteredExpensesTotal =
+    data.expenses.recordedTotal ??
+    data.expenses.production.total +
+      data.expenses.selling.total +
+      data.expenses.overhead.total +
+      data.expenses.unclassifiedTotal
+  // Expense-entry chart only — not P&L COGS. Do not mix with productionCost.
   const costGroups = [
-    { label: 'Production Expenses', amount: data.expenses.production.total, pct: data.expenses.production.percentOfTotal },
+    {
+      label: 'Inventory/Production Purchases',
+      amount: data.expenses.production.total,
+      pct: data.expenses.production.percentOfTotal,
+    },
     { label: 'Selling Cost', amount: data.expenses.selling.total, pct: data.expenses.selling.percentOfTotal },
     { label: 'Overhead Cost', amount: data.expenses.overhead.total, pct: data.expenses.overhead.percentOfTotal },
-    { label: 'Unclassified Expenses', amount: data.expenses.unclassifiedTotal, pct: data.expenses.unclassified.percentOfTotal },
+    {
+      label: 'Unclassified Expenses',
+      amount: data.expenses.unclassifiedTotal,
+      pct: data.expenses.unclassified.percentOfTotal,
+    },
   ]
+  const pctTotal = costGroups.reduce((sum, group) => sum + group.pct, 0)
 
   return (
     <div className="space-y-4">
@@ -67,7 +83,7 @@ export function OverviewTab({
         <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-semibold text-zinc-900">Profit and Loss Summary</h3>
           <Row label="Sales Revenue" value={money(p.revenue)} />
-          <Row label="Less: Production Cost" value={money(p.productionCost)} tone="muted" />
+          <Row label="Less: Production Cost (COGS)" value={money(p.productionCost)} tone="muted" />
           <Row
             label="Gross Profit"
             value={money(p.grossProfit)}
@@ -88,13 +104,18 @@ export function OverviewTab({
         </section>
 
         <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-zinc-900">Cost Structure</h3>
+          <h3 className="mb-3 text-sm font-semibold text-zinc-900">Entered Expense Structure</h3>
+          <p className="mb-3 text-xs text-zinc-500">
+            Share of expense records entered in this period ({money(enteredExpensesTotal)}). This is
+            not the P&amp;L cost mix — P&amp;L Production Cost (COGS) is {money(p.productionCost)} and
+            uses sale-line unit costs, not these PRODUCTION expense totals.
+          </p>
           <div className="mb-3 flex h-3 overflow-hidden rounded-full bg-zinc-100">
             {costGroups.map((group, index) =>
               group.amount > 0 ? (
                 <div
                   key={group.label}
-                  title={`${group.label}: ${group.pct.toFixed(1)}%`}
+                  title={`${group.label}: ${group.pct.toFixed(2)}%`}
                   className={cn(
                     index === 0 && 'bg-teal-600',
                     index === 1 && 'bg-amber-500',
@@ -112,10 +133,17 @@ export function OverviewTab({
                 <span className="text-zinc-600">{group.label}</span>
                 <span className="tabular-nums text-zinc-900">
                   {money(group.amount)}{' '}
-                  <span className="text-xs text-zinc-500">({group.pct.toFixed(1)}%)</span>
+                  <span className="text-xs text-zinc-500">({group.pct.toFixed(2)}%)</span>
                 </span>
               </div>
             ))}
+            <div className="flex items-center justify-between gap-3 border-t border-zinc-100 pt-2 text-sm">
+              <span className="font-medium text-zinc-900">Total entered expenses</span>
+              <span className="tabular-nums font-medium text-zinc-900">
+                {money(enteredExpensesTotal)}{' '}
+                <span className="text-xs font-normal text-zinc-500">({pctTotal.toFixed(2)}%)</span>
+              </span>
+            </div>
           </div>
         </section>
       </div>

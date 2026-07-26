@@ -289,6 +289,41 @@ describe('calculateSalesProfitability', () => {
     expect(result.grossProfit).toBe(52)
   })
 
+  it('builds a COGS breakdown from quantity × sale-time unit cost', () => {
+    const result = calculateSalesProfitability([
+      {
+        id: 's1',
+        invoiceNumber: 'INV-1',
+        date: '2026-07-25',
+        totalAmount: 525,
+        items: [
+          {
+            productId: 'p1',
+            productName: 'T-Shirt',
+            quantity: 15,
+            unitCost: 25,
+            lineTotal: 525,
+          },
+        ],
+      },
+    ])
+
+    expect(result.productionCost).toBe(375)
+    expect(result.cogsBreakdown).toEqual([
+      {
+        saleId: 's1',
+        invoiceNumber: 'INV-1',
+        date: '2026-07-25',
+        productId: 'p1',
+        productName: 'T-Shirt',
+        quantity: 15,
+        unitCost: 25,
+        lineCogs: 375,
+        source: 'unitCostSnapshot',
+      },
+    ])
+  })
+
   it('does not treat PRODUCTION expenses as Unclassified or fold them into Net Profit', () => {
     const result = calculateSalesProfitability(
       [

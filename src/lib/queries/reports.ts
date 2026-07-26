@@ -9,6 +9,7 @@ import {
 } from '@/lib/dashboard-date-range'
 import { prismaDateFilter } from '@/lib/dates'
 import { prisma } from '@/lib/prisma'
+import { explainUnitCostFromBreakdown } from '@/lib/cogs-reconciliation'
 import { expenseNeedsClassification } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, percent, subMoney } from '@/lib/money'
 import { calculateSalesProfitability } from '@/lib/services/sales-profitability'
@@ -114,6 +115,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         vendor: true,
         reference: true,
         notes: true,
+        cashAccountId: true,
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
@@ -123,9 +125,11 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         id: true,
         name: true,
         currentStock: true,
+        openingStock: true,
         lowStockLevel: true,
         costPrice: true,
         sellingPrice: true,
+        costBreakdown: true,
         isActive: true,
       },
       orderBy: { name: 'asc' },
@@ -153,6 +157,8 @@ export async function getReportsData(userId: string, params: DashboardDateParams
   const profitability = calculateSalesProfitability(
     sales.map((sale) => ({
       id: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      date: sale.date,
       paymentStatus: sale.paymentStatus,
       subtotal: sale.subtotal,
       discount: sale.discount,
@@ -181,6 +187,119 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       expenseIds: expenses.map((expense) => expense.id),
     })
   }
+
+  const soldProductIds = [
+    ...new Set(
+      profitability.cogsBreakdown
+        .map((line) => line.productId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ]
+  const stockMovements =
+    soldProductIds.length > 0
+      ? await prisma.stockMovement.findMany({
+          where: { userId, productId: { in: soldProductIds } },
+          select: {
+            id: true,
+            productId: true,
+            type: true,
+            quantity: true,
+            date: true,
+            notes: true,
+            saleId: true,
+          },
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+        })
+      : []
+
+  const productById = new Map(products.map((product) => [product.id, product]))
+  const movementsByProduct = new Map<string, typeof stockMovements>()
+  for (const movement of stockMovements) {
+    const list = movementsByProduct.get(movement.productId) ?? []
+    list.push(movement)
+    movementsByProduct.set(movement.productId, list)
+  }
+
+  const productionExpenseRows = expenses.filter((expense) => expense.costType === 'PRODUCTION')
+  const cogsByProduct = new Map<
+    string,
+    { productId: string; productName: string; quantitySold: number; lineCogs: number; unitCost: number }
+  >()
+  for (const line of profitability.cogsBreakdown) {
+    const key = line.productId ?? `name:${line.productName}`
+    const current = cogsByProduct.get(key) ?? {
+      productId: line.productId ?? key,
+      productName: line.productName,
+      quantitySold: 0,
+      lineCogs: 0,
+      unitCost: line.unitCost,
+    }
+    current.quantitySold += line.quantity
+    current.lineCogs = moneyNumber(money(current.lineCogs).plus(line.lineCogs))
+    current.unitCost = line.unitCost
+    current.productName = line.productName
+    cogsByProduct.set(key, current)
+  }
+
+  const cogsReconciliation = [...cogsByProduct.values()].map((row) => {
+    const product = row.productId ? productById.get(row.productId) : undefined
+    const explanation = explainUnitCostFromBreakdown(
+      product?.costBreakdown,
+      row.quantitySold,
+      row.unitCost,
+    )
+    const movements = row.productId ? (movementsByProduct.get(row.productId) ?? []) : []
+    const stockAdded = movements
+      .filter((m) => m.quantity > 0 && m.type !== 'SALE_REVERSAL')
+      .reduce((sum, m) => sum + m.quantity, 0)
+    const stockSold = movements
+      .filter((m) => m.type === 'SALE')
+      .reduce((sum, m) => sum + Math.abs(m.quantity), 0)
+    const stockAdjustments = movements
+      .filter((m) => m.type.startsWith('ADJUSTMENT') || m.type === 'SALE_REVERSAL')
+      .reduce((sum, m) => sum + m.quantity, 0)
+
+    return {
+      productId: product?.id ?? row.productId,
+      productName: row.productName,
+      quantitySold: row.quantitySold,
+      saleTimeUnitCost: row.unitCost,
+      catalogUnitCost: product ? moneyNumber(product.costPrice) : null,
+      lineCogs: row.lineCogs,
+      ...explanation,
+      inventory: product
+        ? {
+            openingStock: product.openingStock,
+            stockAdded,
+            stockSold,
+            stockAdjustments,
+            currentStock: product.currentStock,
+            movements: movements.map((m) => ({
+              id: m.id,
+              type: m.type,
+              quantity: m.quantity,
+              date: m.date.toISOString(),
+              notes: m.notes,
+              saleId: m.saleId,
+            })),
+          }
+        : null,
+    }
+  })
+
+  const productionExpenseAudit = productionExpenseRows.map((expense) => ({
+    id: expense.id,
+    date: expense.date.toISOString(),
+    description: expense.description,
+    category: expense.category.name,
+    amount: moneyNumber(expense.amount),
+    cashAccountId: expense.cashAccountId,
+    linkedToProduct: false as const,
+    increasesInventoryInSystem: false as const,
+    hasCashLedgerLink: Boolean(expense.cashAccountId),
+    note:
+      'Stored as an Expense with costType PRODUCTION. Not linked to a product, does not create stock movements, and does not update product costPrice or inventory asset value. It is not the source of sale-line unitCost unless that amount also appears in Product.costBreakdown.',
+  }))
 
   const operatingExpenseRows = expenses.filter(
     (expense) => expense.costType === 'SELLING' || expense.costType === 'OVERHEAD' || !expense.costType,
@@ -242,8 +361,8 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       buckets.set(key, current)
     }
 
-    const operatingBase = money(profitability.operatingExpenses)
-    const percentBase = costType === 'PRODUCTION' ? allExpensesMoney : operatingBase.gt(0) ? operatingBase : allExpensesMoney
+    // One denominator for every expense-structure line: total entered expenses.
+    const percentBase = allExpensesMoney
     return {
       total: moneyNumber(groupTotal),
       percentOfTotal: moneyNumber(percent(groupTotal, percentBase)),
@@ -481,6 +600,9 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       netMargin: hasRevenue ? profitability.netMargin : null,
       inventoryCogs: moneyNumber(inventoryCogs),
       reconciliation: profitability.reconciliation,
+      cogsBreakdown: profitability.cogsBreakdown,
+      cogsReconciliation,
+      productionExpenseAudit,
       expenseTransactions: {
         selling: expenses.filter((expense) => expense.costType === 'SELLING').map(mapExpenseTxn),
         overhead: expenses.filter((expense) => expense.costType === 'OVERHEAD').map(mapExpenseTxn),

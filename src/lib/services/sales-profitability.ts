@@ -1,5 +1,6 @@
 import {
   addMoney,
+  divMoney,
   money,
   moneyNumber,
   mulMoney,
@@ -21,6 +22,8 @@ export type ProfitabilitySaleLine = {
 
 export type ProfitabilitySale = {
   id?: string
+  invoiceNumber?: string | null
+  date?: string | Date | null
   /** Optional status — cancelled/voided/draft sales are excluded when provided. */
   status?: string | null
   paymentStatus?: string | null
@@ -28,6 +31,18 @@ export type ProfitabilitySale = {
   discount?: MoneyInput
   totalAmount: MoneyInput
   items: ProfitabilitySaleLine[]
+}
+
+export type CogsBreakdownLine = {
+  saleId: string | null
+  invoiceNumber: string | null
+  date: string | null
+  productId: string | null
+  productName: string
+  quantity: number
+  unitCost: number
+  lineCogs: number
+  source: 'unitCostSnapshot' | 'lineCostFallback' | 'zero'
 }
 
 export type ProfitabilityExpense = {
@@ -62,6 +77,8 @@ export type SalesProfitabilityResult = {
   netProfit: number
   netMargin: number
   productProfitability: ProductProfitabilityRow[]
+  /** Line-level inventory COGS detail: quantity × sale-time unit cost. */
+  cogsBreakdown: CogsBreakdownLine[]
   reconciliation: {
     ok: boolean
     expectedGrossProfit: number
@@ -139,6 +156,7 @@ export function calculateSalesProfitability(
   >()
 
   let productionCostMoney = money(0)
+  const cogsBreakdown: CogsBreakdownLine[] = []
 
   for (const sale of included) {
     const lineTotals = sale.items.map((item) => money(item.lineTotal))
@@ -148,6 +166,12 @@ export function calculateSalesProfitability(
         : addMoney(...lineTotals),
     )
     const discount = money(sale.discount)
+    const saleDate =
+      sale.date instanceof Date
+        ? sale.date.toISOString()
+        : sale.date
+          ? String(sale.date)
+          : null
 
     for (const item of sale.items) {
       const qty = Number(item.quantity) || 0
@@ -159,6 +183,16 @@ export function calculateSalesProfitability(
           : money(0)
       const productSales = subMoney(lineTotal, allocatedDiscount)
       const lineCogs = lineCogsFromSnapshot(item)
+      const source: CogsBreakdownLine['source'] = hasUnitCostSnapshot(item)
+        ? 'unitCostSnapshot'
+        : item.lineCost !== undefined && item.lineCost !== null && item.lineCost !== ''
+          ? 'lineCostFallback'
+          : 'zero'
+      const unitCost = hasUnitCostSnapshot(item)
+        ? moneyNumber(item.unitCost)
+        : qty !== 0
+          ? moneyNumber(divMoney(lineCogs, qty))
+          : 0
 
       productionCostMoney = productionCostMoney.plus(lineCogs)
 
@@ -178,6 +212,18 @@ export function calculateSalesProfitability(
       row.sales = row.sales.plus(productSales)
       row.costOfGoodsSold = row.costOfGoodsSold.plus(lineCogs)
       productMap.set(key, row)
+
+      cogsBreakdown.push({
+        saleId: sale.id ?? null,
+        invoiceNumber: sale.invoiceNumber ?? null,
+        date: saleDate,
+        productId,
+        productName,
+        quantity: qty,
+        unitCost,
+        lineCogs: moneyNumber(lineCogs),
+        source,
+      })
     }
   }
 
@@ -278,6 +324,7 @@ export function calculateSalesProfitability(
     netProfit,
     netMargin: moneyNumber(netMarginMoney),
     productProfitability,
+    cogsBreakdown,
     reconciliation: {
       ok: messages.length === 0,
       expectedGrossProfit,

@@ -25,7 +25,7 @@ export function ExpensesTab({ data, currency }: { data: ReportsData; currency: s
   }[] = [
     {
       key: 'production',
-      title: 'Production Cost Breakdown',
+      title: 'Production Expenses Breakdown',
       total: data.expenses.production.total,
       pct: data.expenses.production.percentOfTotal,
       breakdown: data.expenses.production.breakdown,
