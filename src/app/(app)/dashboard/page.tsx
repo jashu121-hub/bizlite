@@ -81,7 +81,7 @@ export default async function DashboardPage({
       label: data.cards.labels.totalCost,
       value: data.cards.totalCost,
       trend: data.cards.trends.totalCost,
-      subtitle: 'Production and operating costs',
+      subtitle: 'COGS and operating expenses',
       summary: data.kpiSummaries.totalCost,
     },
     {
@@ -90,6 +90,7 @@ export default async function DashboardPage({
       value: data.cards.netProfit,
       trend: data.cards.trends.netProfit,
       danger: data.cards.netProfit < 0,
+      subtitle: 'Sales minus COGS and operating expenses',
       summary: data.kpiSummaries.netProfit,
     },
     {

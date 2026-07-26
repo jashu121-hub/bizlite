@@ -1,19 +1,15 @@
-import type { ExpenseCostType } from '@prisma/client'
 import { format, startOfDay } from 'date-fns'
 
 import {
-  computeDashboardTotalCost,
   dashboardCostTypeLabel,
-  type DashboardCostExpenseRow,
+  type DashboardTotalCostResult,
 } from '@/lib/dashboard-total-cost'
 import type { DateFilterPreset } from '@/lib/dates'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
 import { addMoney, money, moneyNumber, type MoneyInput } from '@/lib/money'
 import type { KpiSummary, KpiType } from '@/lib/types/kpi'
 
-export { validateDashboardTotalCost } from '@/lib/dashboard-total-cost'
-
-/** @deprecated Use validateDashboardTotalCost */
+/** @deprecated Kept for older imports */
 export function validateOperatingExpenseKpi(input: {
   total: number
   transactionCount: number
@@ -86,15 +82,6 @@ type SaleRow = {
   customer: { name: string } | null
 }
 
-type ExpenseRow = {
-  id: string
-  date: Date
-  amount: MoneyInput
-  costType: ExpenseCostType | null
-  category: { name: string }
-  description: string
-}
-
 type ProductRow = {
   id: string
   name: string
@@ -106,10 +93,8 @@ type ProductRow = {
 export function buildKpiSummaries(input: {
   todaySalesRows: SaleRow[]
   periodSalesRows: SaleRow[]
-  /** All period cost expense rows (Production + Selling + Overhead + Unclassified). */
-  totalCostExpenseRows: ExpenseRow[]
-  /** Operating expenses only — used for Net Profit disclosure, not Total Cost. */
-  operatingExpenseTotal: number
+  /** Shared Total Cost breakdown from computeDashboardTotalCost (KPI + charts). */
+  totalCostBreakdown: DashboardTotalCostResult
   pendingSalesAll: SaleRow[]
   products: ProductRow[]
   cards: {
@@ -156,9 +141,7 @@ export function buildKpiSummaries(input: {
   const periodCount = input.cards.periodInvoiceCount
   const periodAvg = periodCount > 0 ? input.cards.monthSales / periodCount : 0
 
-  const totalCostResult = computeDashboardTotalCost(
-    input.totalCostExpenseRows as DashboardCostExpenseRow[],
-  )
+  const totalCostResult = input.totalCostBreakdown
   const totalCost =
     Math.abs(totalCostResult.totalCost - input.cards.totalCost) < 0.005
       ? input.cards.totalCost
@@ -273,27 +256,16 @@ export function buildKpiSummaries(input: {
       rangeLabel: input.periodLabel,
       primaryValue: totalCost,
       rows: [
-        { kind: 'count', label: 'Total entries', value: totalCostResult.entryCount },
+        { kind: 'money', label: 'COGS / Product Cost', value: totalCostResult.cogs },
         {
-          kind: 'text',
-          label: 'Highest category',
-          value: totalCostResult.highestCategory
-            ? `${totalCostResult.highestCategory.name} — ${totalCostResult.highestCategory.percent.toFixed(2)}%`
-            : '—',
-        },
-        {
-          kind: 'text',
-          label: 'Highest transaction',
-          value: totalCostResult.highestTransaction
-            ? `${totalCostResult.highestTransaction.description} — ${format(totalCostResult.highestTransaction.date, 'dd MMM yyyy')}`
-            : '—',
+          kind: 'money',
+          label: 'Operating Expenses',
+          value: totalCostResult.operatingExpenses,
         },
         {
           kind: 'money',
-          label: 'Highest transaction amount',
-          value: totalCostResult.highestTransaction
-            ? moneyNumber(totalCostResult.highestTransaction.amount)
-            : 0,
+          label: 'Total Cost',
+          value: totalCost,
         },
         {
           kind: 'text',
@@ -304,8 +276,8 @@ export function buildKpiSummaries(input: {
       ],
       sections: [
         {
-          id: 'by-cost-type',
-          title: 'By Cost Type',
+          id: 'cost-breakdown',
+          title: 'Cost breakdown',
           defaultOpen: true,
           categories: totalCostResult.byCostType.map((row) => ({
             name: row.name,
@@ -315,7 +287,7 @@ export function buildKpiSummaries(input: {
         },
         {
           id: 'by-category',
-          title: 'By Expense Category',
+          title: 'By category',
           defaultOpen: true,
           categories: totalCostResult.byCategory.map((row) => ({
             name: row.name,
@@ -325,7 +297,7 @@ export function buildKpiSummaries(input: {
         },
         {
           id: 'recent-entries',
-          title: 'Recent Cost Entries',
+          title: 'Recent operating cost entries',
           defaultOpen: false,
           listItems: totalCostResult.recentEntries.map((row) => ({
             id: row.id,
@@ -336,9 +308,11 @@ export function buildKpiSummaries(input: {
           })),
         },
       ],
-      emptyMessage: 'No cost entries found for this period.',
-      detailsHref: listHref(
-        '/expenses',
+      emptyMessage:
+        totalCost > 0
+          ? 'Cost details are available above.'
+          : 'No COGS or operating expenses for this period.',
+      detailsHref: reportsHref(
         input.periodType,
         input.customFrom,
         input.customTo,
@@ -354,10 +328,16 @@ export function buildKpiSummaries(input: {
       primaryTone: input.cards.netProfit >= 0 ? 'success' : 'danger',
       rows: [
         { kind: 'money', label: 'Total sales', value: input.periodSalesTotal },
+        { kind: 'money', label: 'COGS / Product Cost', value: totalCostResult.cogs },
         {
           kind: 'money',
           label: 'Operating expenses',
-          value: input.operatingExpenseTotal,
+          value: totalCostResult.operatingExpenses,
+        },
+        {
+          kind: 'money',
+          label: 'Total Cost',
+          value: totalCost,
         },
         {
           kind: 'money',

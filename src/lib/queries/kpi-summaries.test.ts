@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { computeDashboardTotalCost } from '@/lib/dashboard-total-cost'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 import type { PeriodComparison } from '@/lib/dashboard-date-range'
 
@@ -10,44 +11,25 @@ const neutralTrend: PeriodComparison = {
 }
 
 describe('total cost KPI summary', () => {
-  it('builds a combined Total Cost popup from all cost entries', () => {
+  it('shows COGS + operating expenses from the shared Total Cost service', () => {
+    // Pure COGS case: Sales 700, COGS 500, OpEx 0
+    const costs = computeDashboardTotalCost({
+      costingMode: 'INVENTORY',
+      saleLineCogs: 500,
+      expenses: [],
+    })
+
     const summary = buildKpiSummaries({
       todaySalesRows: [],
       periodSalesRows: [],
-      totalCostExpenseRows: [
-        {
-          id: '1',
-          date: new Date(2026, 6, 25),
-          amount: '300.00',
-          costType: 'PRODUCTION',
-          category: { name: 'Materials' },
-          description: 'materials',
-        },
-        {
-          id: '2',
-          date: new Date(2026, 6, 25),
-          amount: '100.00',
-          costType: 'SELLING',
-          category: { name: 'Customer Delivery' },
-          description: 'Transportation',
-        },
-        {
-          id: '3',
-          date: new Date(2026, 6, 20),
-          amount: '75.00',
-          costType: 'OVERHEAD',
-          category: { name: 'Salary' },
-          description: 'Wages',
-        },
-      ],
-      operatingExpenseTotal: 175,
+      totalCostBreakdown: costs,
       pendingSalesAll: [],
       products: [],
       cards: {
         todaySales: 0,
         monthSales: 700,
-        totalCost: 475,
-        netProfit: 150,
+        totalCost: costs.totalCost,
+        netProfit: 200,
         pendingPayments: 0,
         stockValue: 0,
         lowStockCount: 0,
@@ -74,29 +56,66 @@ describe('total cost KPI summary', () => {
     }).totalCost
 
     expect(summary.title).toBe('This Month Total Cost')
-    expect(summary.primaryValue).toBe(475)
-    expect(summary.rows.find((row) => row.label === 'Total entries')?.value).toBe(3)
-    expect(summary.rows.find((row) => row.label === 'Highest category')?.value).toBe(
-      'Materials — 63.16%',
-    )
-    expect(summary.rows.find((row) => row.label === 'Highest transaction')?.value).toBe(
-      'materials — 25 Jul 2026',
-    )
-    expect(summary.rows.find((row) => row.label === 'Highest transaction amount')?.value).toBe(
-      300,
-    )
+    expect(summary.primaryValue).toBe(500)
+    expect(summary.rows.find((row) => row.label === 'COGS / Product Cost')?.value).toBe(500)
+    expect(summary.rows.find((row) => row.label === 'Operating Expenses')?.value).toBe(0)
+    expect(summary.rows.find((row) => row.label === 'Total Cost')?.value).toBe(500)
     expect(summary.sections?.map((section) => section.id)).toEqual([
-      'by-cost-type',
+      'cost-breakdown',
       'by-category',
       'recent-entries',
     ])
-    const byType = summary.sections?.find((section) => section.id === 'by-cost-type')?.categories
-    expect(byType?.find((row) => row.name === 'Production Cost')?.amount).toBe(300)
-    expect(byType?.find((row) => row.name === 'Selling Cost')?.percent).toBeCloseTo(21.05, 2)
-    const recent = summary.sections?.find((section) => section.id === 'recent-entries')?.listItems
-    expect(recent?.[0]?.primary).toBe('materials')
-    expect(recent?.[0]?.secondary).toContain('Production Cost')
-    expect(summary.detailsHref).toContain('/expenses?preset=month')
-    expect(summary.detailsHref).not.toContain('costType=')
+    const byType = summary.sections?.find((section) => section.id === 'cost-breakdown')?.categories
+    expect(byType?.find((row) => row.name === 'COGS / Product Cost')?.amount).toBe(500)
+    expect(byType?.find((row) => row.name === 'Operating Expenses')?.amount).toBe(0)
+    expect(summary.detailsHref).toContain('/reports?')
+  })
+
+  it('net profit popup includes COGS so Sales − Total Cost reconciles', () => {
+    const costs = computeDashboardTotalCost({
+      costingMode: 'INVENTORY',
+      saleLineCogs: 500,
+      expenses: [],
+    })
+    const net = buildKpiSummaries({
+      todaySalesRows: [],
+      periodSalesRows: [],
+      totalCostBreakdown: costs,
+      pendingSalesAll: [],
+      products: [],
+      cards: {
+        todaySales: 0,
+        monthSales: 700,
+        totalCost: 500,
+        netProfit: 200,
+        pendingPayments: 0,
+        stockValue: 0,
+        lowStockCount: 0,
+        periodPaid: 700,
+        periodPending: 0,
+        periodInvoiceCount: 1,
+        trends: {
+          todaySales: neutralTrend,
+          monthSales: neutralTrend,
+          totalCost: neutralTrend,
+          netProfit: neutralTrend,
+        },
+      },
+      periodSalesTotal: 700,
+      periodLabel: 'July 2026',
+      firstCardTitle: "Today's Sales",
+      firstCardRangeLabel: '25 Jul 2026',
+      salesTitle: 'This Month Sales',
+      totalCostTitle: 'This Month Total Cost',
+      isTodayFirstCard: true,
+      periodType: 'month',
+      year: 2026,
+      month: 7,
+    }).netProfit
+
+    expect(net.rows.find((r) => r.label === 'Total sales')?.value).toBe(700)
+    expect(net.rows.find((r) => r.label === 'COGS / Product Cost')?.value).toBe(500)
+    expect(net.rows.find((r) => r.label === 'Total Cost')?.value).toBe(500)
+    expect(net.rows.find((r) => r.label === 'Net profit')?.value).toBe(200)
   })
 })

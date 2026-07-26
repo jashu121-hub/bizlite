@@ -19,7 +19,10 @@ import {
   toLocalDateInput,
   type DashboardDateParams,
 } from '@/lib/dashboard-date-range'
-import { computeDashboardTotalCost } from '@/lib/dashboard-total-cost'
+import {
+  computeDashboardTotalCost,
+  reconcileDashboardPnL,
+} from '@/lib/dashboard-total-cost'
 import { isOperatingExpenseCostType } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
@@ -276,16 +279,33 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
 
   const costingMode = profile?.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY'
   const periodRevenue = periodSalesAgg.total
-  // Align with Reports: Inventory = sale-line COGS; Simple = entered PRODUCTION expenses.
-  const periodCogsForPnL =
-    costingMode === 'SIMPLE' ? periodProductionCost : periodSalesAgg.cost
+
+  // Shared Total Cost = COGS + Operating Expenses (same dataset for KPI, popup, charts).
+  const totalCostResult = computeDashboardTotalCost({
+    costingMode,
+    saleLineCogs: periodSalesAgg.cost,
+    expenses: periodExpenses,
+  })
+  // Previous period: reuse aggregates (avoid re-fetching full expense rows).
   const prevCogsForPnL =
     costingMode === 'SIMPLE' ? prevProductionCost : prevSales.cost
-  const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodCogsForPnL))
-  // periodExpenseTotal is operating expenses only (excludes PRODUCTION / COGS)
-  const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
-  const prevGross = moneyNumber(subMoney(prevSales.total, prevCogsForPnL))
-  const prevNet = moneyNumber(subMoney(prevGross, prevExpenseTotal))
+  const prevPeriodTotalCost = moneyNumber(addMoney(prevCogsForPnL, prevExpenseTotal))
+
+  const periodCogsForPnL = totalCostResult.cogs
+  const periodTotalCost = totalCostResult.totalCost
+  // Net Profit = Sales − Total Cost (= Sales − COGS − Operating Expenses)
+  const periodGross = moneyNumber(subMoney(periodRevenue, periodCogsForPnL))
+  const periodNet = moneyNumber(subMoney(periodRevenue, periodTotalCost))
+  const prevNet = moneyNumber(subMoney(prevSales.total, prevPeriodTotalCost))
+
+  reconcileDashboardPnL({
+    sales: periodRevenue,
+    cogs: periodCogsForPnL,
+    operatingExpenses: totalCostResult.operatingExpenses,
+    totalCost: periodTotalCost,
+    netProfit: periodNet,
+    dateRangeLabel: dashboardRange.displayLabel,
+  })
 
   const pendingPayments = moneyNumber(pendingAgg._sum.balancePending || 0)
   const stockValue = moneyNumber(
@@ -296,10 +316,9 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const operatingExpenseRows = periodExpenses.filter((expense) =>
     isOperatingExpenseCostType(expense.costType),
   )
-  // Shared Total Cost dataset for KPI, popup, and cost charts (includes Production).
-  const totalCostResult = computeDashboardTotalCost(periodExpenses)
-  const periodTotalCost = totalCostResult.totalCost
-  const prevPeriodTotalCost = moneyNumber(addMoney(prevExpenseTotal, prevProductionCost))
+  const productionExpenseRows = periodExpenses.filter(
+    (expense) => expense.costType === 'PRODUCTION',
+  )
   const totalCostByCategory = totalCostResult.byCategory.map((row) => ({
     name: row.name,
     value: row.amount,
@@ -317,15 +336,20 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const profitTrend = intervals.map((point) => {
     const key = bucketKey(point, grouping)
     const daySales = periodSales.filter((s) => bucketKey(s.date, grouping) === key)
-    // Net trend still uses operating expenses so P&L is not mixed with Total Cost.
-    const dayExpenses = operatingExpenseRows.filter((e) => bucketKey(e.date, grouping) === key)
+    const dayOpEx = operatingExpenseRows.filter((e) => bucketKey(e.date, grouping) === key)
+    const dayProduction = productionExpenseRows.filter((e) => bucketKey(e.date, grouping) === key)
     const sales = addMoney(...daySales.map((s) => s.totalAmount))
-    const expenses = addMoney(...dayExpenses.map((e) => e.amount))
+    const dayCogs =
+      costingMode === 'SIMPLE'
+        ? addMoney(...dayProduction.map((e) => e.amount))
+        : addMoney(...daySales.map((s) => s.totalCost))
+    const dayOperating = addMoney(...dayOpEx.map((e) => e.amount))
+    const dayTotalCost = addMoney(dayCogs, dayOperating)
     return {
       name: bucketLabel(point, grouping),
-      value: moneyNumber(subMoney(sales, expenses)),
+      value: moneyNumber(subMoney(sales, dayTotalCost)),
       sales: moneyNumber(sales),
-      expenses: moneyNumber(expenses),
+      expenses: moneyNumber(dayTotalCost),
     }
   })
 
@@ -383,8 +407,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const kpiSummaries = buildKpiSummaries({
     todaySalesRows,
     periodSalesRows: periodSales,
-    totalCostExpenseRows: periodExpenses,
-    operatingExpenseTotal: periodExpenseTotal,
+    totalCostBreakdown: totalCostResult,
     pendingSalesAll,
     products,
     cards: {
