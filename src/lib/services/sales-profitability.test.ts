@@ -289,7 +289,7 @@ describe('calculateSalesProfitability', () => {
     expect(result.grossProfit).toBe(52)
   })
 
-  it('computes net profit after selling, overhead, and unclassified (incl. production expenses)', () => {
+  it('does not treat PRODUCTION expenses as Unclassified or fold them into Net Profit', () => {
     const result = calculateSalesProfitability(
       [
         {
@@ -299,27 +299,49 @@ describe('calculateSalesProfitability', () => {
               productId: 'p1',
               productName: 'T-Shirt',
               quantity: 15,
-              unitCost: 20,
+              unitCost: 25,
               lineTotal: 525,
             },
           ],
         },
       ],
       [
-        { amount: 50, costType: 'SELLING' },
-        { amount: 30, costType: 'OVERHEAD' },
-        { amount: 20, costType: 'PRODUCTION' },
-        { amount: 10, costType: null },
+        { amount: 100, costType: 'SELLING' },
+        { amount: 75, costType: 'OVERHEAD' },
+        { amount: 300, costType: 'PRODUCTION' },
       ],
     )
 
-    expect(result.grossProfit).toBe(225)
-    expect(result.sellingCost).toBe(50)
-    expect(result.profitAfterSellingCosts).toBe(175)
-    expect(result.overheadCost).toBe(30)
-    expect(result.productionExpenses).toBe(20)
-    expect(result.unclassifiedExpenses).toBe(30) // 20 production + 10 null
-    expect(result.netProfit).toBe(115) // 225 - 50 - 30 - 30
-    expect(result.netMargin).toBe(21.9) // 115 / 525 × 100, rounded to 2 dp
+    expect(result.productionCost).toBe(375)
+    expect(result.grossProfit).toBe(150)
+    expect(result.sellingCost).toBe(100)
+    expect(result.overheadCost).toBe(75)
+    expect(result.productionExpenses).toBe(300)
+    expect(result.unclassifiedExpenses).toBe(0)
+    expect(result.operatingExpenses).toBe(175)
+    expect(result.profitAfterSellingCosts).toBe(50)
+    expect(result.netProfit).toBe(-25)
+    expect(result.netMargin).toBe(-4.76)
+    expect(result.reconciliation.ok).toBe(true)
+  })
+
+  it('only counts null-classification expenses as Unclassified', () => {
+    const result = calculateSalesProfitability(
+      [
+        {
+          totalAmount: 100,
+          items: [{ productName: 'A', quantity: 1, unitCost: 40, lineTotal: 100 }],
+        },
+      ],
+      [
+        { amount: 10, costType: null },
+        { amount: 20, costType: 'PRODUCTION' },
+        { amount: 5, costType: 'SELLING' },
+      ],
+    )
+
+    expect(result.unclassifiedExpenses).toBe(10)
+    expect(result.operatingExpenses).toBe(15)
+    expect(result.netProfit).toBe(45) // 60 GP - 5 selling - 0 overhead - 10 unclassified
   })
 })

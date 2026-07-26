@@ -51,7 +51,7 @@ async function sumSales(
   }
 }
 
-async function sumExpenses(userId: string, from: Date | null, to: Date | null): Promise<number> {
+async function sumOperatingExpenses(userId: string, from: Date | null, to: Date | null): Promise<number> {
   const date =
     from || to
       ? {
@@ -59,11 +59,15 @@ async function sumExpenses(userId: string, from: Date | null, to: Date | null): 
           ...(to ? { lte: to } : {}),
         }
       : undefined
-  const agg = await prisma.expense.aggregate({
-    where: { userId, ...(date ? { date } : {}) },
-    _sum: { amount: true },
+  const rows = await prisma.expense.findMany({
+    where: {
+      userId,
+      ...(date ? { date } : {}),
+      OR: [{ costType: null }, { costType: { in: ['SELLING', 'OVERHEAD'] } }],
+    },
+    select: { amount: true },
   })
-  return moneyNumber(agg._sum.amount || 0)
+  return moneyNumber(addMoney(...rows.map((row) => row.amount)))
 }
 
 const saleSummarySelect = {
@@ -147,12 +151,16 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     todaySalesRowsRaw,
   ] = await Promise.all([
     sumSales(userId, dashboardRange.startDate, dashboardRange.endDate),
-    sumExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
+    sumOperatingExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
     dashboardRange.previousStartDate && dashboardRange.previousEndDate
       ? sumSales(userId, dashboardRange.previousStartDate, dashboardRange.previousEndDate)
       : Promise.resolve(emptySalesAgg),
     dashboardRange.previousStartDate && dashboardRange.previousEndDate
-      ? sumExpenses(userId, dashboardRange.previousStartDate, dashboardRange.previousEndDate)
+      ? sumOperatingExpenses(
+          userId,
+          dashboardRange.previousStartDate,
+          dashboardRange.previousEndDate,
+        )
       : Promise.resolve(0),
     isCurrentMonthView
       ? sumSales(userId, todayStart, endOfDay(new Date()))
@@ -181,6 +189,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         id: true,
         date: true,
         amount: true,
+        costType: true,
         category: { select: { name: true } },
         description: true,
       },
@@ -234,7 +243,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const periodRevenue = periodSalesAgg.total
   // Gross profit = Sales − sale-line COGS (same basis as Reports Profit & Loss)
   const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodSalesAgg.cost))
-  // Net profit = Gross Profit − all operating expenses (matches Reports)
+  // periodExpenseTotal is operating expenses only (excludes PRODUCTION / COGS)
   const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
   const prevGross = moneyNumber(subMoney(prevSales.total, prevSales.cost))
   const prevNet = moneyNumber(subMoney(prevGross, prevExpenseTotal))
@@ -245,8 +254,11 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   )
   const lowStock = products.filter((p) => p.currentStock <= p.lowStockLevel)
 
+  const operatingExpenseRows = periodExpenses.filter(
+    (expense) => expense.costType !== 'PRODUCTION',
+  )
   const expenseByCategory = new Map<string, number>()
-  for (const exp of periodExpenses) {
+  for (const exp of operatingExpenseRows) {
     const label = exp.category.name
     expenseByCategory.set(
       label,
@@ -266,9 +278,10 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   const profitTrend = intervals.map((point) => {
     const key = bucketKey(point, grouping)
     const daySales = periodSales.filter((s) => bucketKey(s.date, grouping) === key)
-    const dayExpenses = periodExpenses.filter((e) => bucketKey(e.date, grouping) === key)
+    const dayExpenses = operatingExpenseRows.filter((e) => bucketKey(e.date, grouping) === key)
     const sales = addMoney(...daySales.map((s) => s.totalAmount))
     const expenses = addMoney(...dayExpenses.map((e) => e.amount))
+    // Chart profit approximates sales − operating expenses (COGS excluded from this series)
     return {
       name: bucketLabel(point, grouping),
       value: moneyNumber(subMoney(sales, expenses)),

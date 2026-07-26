@@ -52,14 +52,22 @@ export type SalesProfitabilityResult = {
   grossMargin: number
   sellingCost: number
   overheadCost: number
-  /** Null-type expenses plus PRODUCTION-typed expenses (no longer used as COGS). */
+  /** Only expenses with a missing/null cost classification. */
   unclassifiedExpenses: number
-  /** PRODUCTION-typed operating expenses only (for expense breakdowns). */
+  /** PRODUCTION-typed expense transactions (not COGS; not part of P&L operating lines). */
   productionExpenses: number
+  /** Selling + Overhead + Unclassified (excludes COGS and PRODUCTION expenses). */
+  operatingExpenses: number
   profitAfterSellingCosts: number
   netProfit: number
   netMargin: number
   productProfitability: ProductProfitabilityRow[]
+  reconciliation: {
+    ok: boolean
+    expectedGrossProfit: number
+    expectedNetProfit: number
+    messages: string[]
+  }
 }
 
 const EXCLUDED_STATUSES = new Set([
@@ -188,14 +196,20 @@ export function calculateSalesProfitability(
       .filter((expense) => expense.costType === 'OVERHEAD')
       .map((expense) => expense.amount),
   )
-  const nullTypeExpenses = addMoney(
+  // Unclassified = only expenses with no classification. Never a residual/
+  // balancing figure, and never PRODUCTION expenses (those are tracked
+  // separately; inventory COGS already covers sold-product cost).
+  const unclassifiedExpensesMoney = addMoney(
     ...expenses
       .filter((expense) => !expense.costType)
       .map((expense) => expense.amount),
   )
-  // PRODUCTION-typed expenses are operating costs, not inventory COGS.
-  // Fold them into unclassified so Net Profit still deducts every expense.
-  const unclassifiedExpensesMoney = addMoney(nullTypeExpenses, productionExpensesMoney)
+
+  const operatingExpensesMoney = addMoney(
+    sellingCostMoney,
+    overheadCostMoney,
+    unclassifiedExpensesMoney,
+  )
 
   const grossProfitMoney = subMoney(salesRevenueMoney, productionCostMoney)
   const profitAfterSellingMoney = subMoney(grossProfitMoney, sellingCostMoney)
@@ -226,18 +240,49 @@ export function calculateSalesProfitability(
     })
     .sort((a, b) => b.sales - a.sales)
 
+  const salesRevenue = moneyNumber(salesRevenueMoney)
+  const productionCost = moneyNumber(productionCostMoney)
+  const grossProfit = moneyNumber(grossProfitMoney)
+  const sellingCost = moneyNumber(sellingCostMoney)
+  const overheadCost = moneyNumber(overheadCostMoney)
+  const unclassifiedExpenses = moneyNumber(unclassifiedExpensesMoney)
+  const netProfit = moneyNumber(netProfitMoney)
+
+  const expectedGrossProfit = moneyNumber(subMoney(salesRevenue, productionCost))
+  const expectedNetProfit = moneyNumber(
+    subMoney(expectedGrossProfit, addMoney(sellingCost, overheadCost, unclassifiedExpenses)),
+  )
+  const messages: string[] = []
+  if (grossProfit !== expectedGrossProfit) {
+    messages.push(
+      `Gross Profit ${grossProfit} does not equal Sales Revenue ${salesRevenue} − COGS ${productionCost} (= ${expectedGrossProfit})`,
+    )
+  }
+  if (netProfit !== expectedNetProfit) {
+    messages.push(
+      `Net Profit ${netProfit} does not equal Gross Profit ${grossProfit} − Selling ${sellingCost} − Overhead ${overheadCost} − Unclassified ${unclassifiedExpenses} (= ${expectedNetProfit})`,
+    )
+  }
+
   return {
-    salesRevenue: moneyNumber(salesRevenueMoney),
-    productionCost: moneyNumber(productionCostMoney),
-    grossProfit: moneyNumber(grossProfitMoney),
+    salesRevenue,
+    productionCost,
+    grossProfit,
     grossMargin: moneyNumber(grossMarginMoney),
-    sellingCost: moneyNumber(sellingCostMoney),
-    overheadCost: moneyNumber(overheadCostMoney),
-    unclassifiedExpenses: moneyNumber(unclassifiedExpensesMoney),
+    sellingCost,
+    overheadCost,
+    unclassifiedExpenses,
     productionExpenses: moneyNumber(productionExpensesMoney),
+    operatingExpenses: moneyNumber(operatingExpensesMoney),
     profitAfterSellingCosts: moneyNumber(profitAfterSellingMoney),
-    netProfit: moneyNumber(netProfitMoney),
+    netProfit,
     netMargin: moneyNumber(netMarginMoney),
     productProfitability,
+    reconciliation: {
+      ok: messages.length === 0,
+      expectedGrossProfit,
+      expectedNetProfit,
+      messages,
+    },
   }
 }

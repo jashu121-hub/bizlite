@@ -101,7 +101,7 @@ export function ExportReportMenu({
         [csvCell('Selling Cost'), csvCell(data.expenses.selling.total)].join(','),
         [csvCell('Overhead Cost'), csvCell(data.expenses.overhead.total)].join(','),
         [csvCell('Unclassified Cost'), csvCell(data.expenses.unclassifiedTotal)].join(','),
-        [csvCell('Total Expenses'), csvCell(data.expenses.total)].join(','),
+        [csvCell('Operating Expenses'), csvCell(data.expenses.operatingTotal ?? data.expenses.total)].join(','),
         [csvCell('Gross Profit'), csvCell(data.profit.grossProfit)].join(','),
         [csvCell('Net Profit'), csvCell(data.profit.netProfit)].join(','),
       ],

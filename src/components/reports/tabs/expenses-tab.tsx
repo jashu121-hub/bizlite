@@ -56,8 +56,17 @@ export function ExpensesTab({ data, currency }: { data: ReportsData; currency: s
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
-        <CompactMetricCard label="Total Expenses" value={money(data.expenses.total)} tone="warning" />
-        <CompactMetricCard label="Production Cost" value={money(data.expenses.production.total)} />
+        <CompactMetricCard
+          label="Operating Expenses"
+          value={money(data.expenses.operatingTotal ?? data.expenses.total)}
+          hint="Selling + Overhead + Unclassified"
+          tone="warning"
+        />
+        <CompactMetricCard
+          label="Production Expenses"
+          value={money(data.expenses.production.total)}
+          hint="Recorded production expenses (not COGS)"
+        />
         <CompactMetricCard label="Selling Cost" value={money(data.expenses.selling.total)} />
         <CompactMetricCard label="Overhead Cost" value={money(data.expenses.overhead.total)} />
         <CompactMetricCard
@@ -65,7 +74,10 @@ export function ExpensesTab({ data, currency }: { data: ReportsData; currency: s
           value={money(data.expenses.unclassifiedTotal)}
           tone={data.expenses.unclassifiedTotal > 0 ? 'warning' : 'default'}
         />
-        <CompactMetricCard label="Number of Expenses" value={data.expenses.count} />
+        <CompactMetricCard
+          label="Number of Expenses"
+          value={data.expenses.recordedCount ?? data.expenses.count}
+        />
         <CompactMetricCard label="Average Expense" value={money(data.expenses.average)} />
       </div>
 

@@ -55,10 +55,10 @@ export function OverviewTab({
   const money = (value: number) => formatCurrency(value, currency)
   const p = data.profit
   const costGroups = [
-    { label: 'Production Cost', amount: data.expenses.production.total, pct: data.expenses.production.percentOfTotal },
+    { label: 'Production Expenses', amount: data.expenses.production.total, pct: data.expenses.production.percentOfTotal },
     { label: 'Selling Cost', amount: data.expenses.selling.total, pct: data.expenses.selling.percentOfTotal },
     { label: 'Overhead Cost', amount: data.expenses.overhead.total, pct: data.expenses.overhead.percentOfTotal },
-    { label: 'Unclassified Cost', amount: data.expenses.unclassifiedTotal, pct: data.expenses.unclassified.percentOfTotal },
+    { label: 'Unclassified Expenses', amount: data.expenses.unclassifiedTotal, pct: data.expenses.unclassified.percentOfTotal },
   ]
 
   return (
@@ -77,7 +77,7 @@ export function OverviewTab({
           />
           <Row label="Less: Selling Cost" value={money(p.sellingCost)} tone="muted" />
           <Row label="Less: Overhead Cost" value={money(p.overheadCost)} tone="muted" />
-          <Row label="Less: Unclassified Cost" value={money(p.unclassifiedCost)} tone="muted" />
+          <Row label="Less: Unclassified Expenses" value={money(p.unclassifiedCost)} tone="muted" />
           <Row
             label="Net Profit"
             value={money(p.netProfit)}

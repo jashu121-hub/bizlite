@@ -147,7 +147,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
   ])
 
   const totalPaidSales = addMoney(...sales.map((sale) => sale.amountPaid))
-  const totalExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
+  const allExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
 
   const productNameById = new Map(products.map((product) => [product.id, product.name]))
   const profitability = calculateSalesProfitability(
@@ -167,11 +167,34 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       })),
     })),
     expenses.map((expense) => ({
+      id: expense.id,
       amount: expense.amount,
       costType: expense.costType,
     })),
     { productNames: productNameById },
   )
+
+  if (!profitability.reconciliation.ok) {
+    console.warn('[reports] Profitability reconciliation failed', {
+      messages: profitability.reconciliation.messages,
+      saleIds: sales.map((sale) => sale.id),
+      expenseIds: expenses.map((expense) => expense.id),
+    })
+  }
+
+  const operatingExpenseRows = expenses.filter(
+    (expense) => expense.costType === 'SELLING' || expense.costType === 'OVERHEAD' || !expense.costType,
+  )
+  const mapExpenseTxn = (expense: (typeof expenses)[number]) => ({
+    id: expense.id,
+    date: expense.date.toISOString(),
+    description: expense.description,
+    category: expense.category.name,
+    costType: expense.costType,
+    amount: moneyNumber(expense.amount),
+    vendor: expense.vendor,
+    reference: expense.reference,
+  })
 
   const revenue = money(profitability.salesRevenue)
   const inventoryCogs = money(profitability.productionCost)
@@ -219,10 +242,12 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       buckets.set(key, current)
     }
 
+    const operatingBase = money(profitability.operatingExpenses)
+    const percentBase = costType === 'PRODUCTION' ? allExpensesMoney : operatingBase.gt(0) ? operatingBase : allExpensesMoney
     return {
       total: moneyNumber(groupTotal),
-      percentOfTotal: moneyNumber(percent(groupTotal, totalExpensesMoney)),
-      breakdown: buildBreakdown([...buckets.values()], groupTotal, totalExpensesMoney),
+      percentOfTotal: moneyNumber(percent(groupTotal, percentBase)),
+      breakdown: buildBreakdown([...buckets.values()], groupTotal, percentBase),
     }
   }
 
@@ -374,7 +399,9 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     },
     summary: {
       sales: salesRevenue,
-      expenses: moneyNumber(totalExpensesMoney),
+      /** Operating expenses only: Selling + Overhead + Unclassified (excludes COGS). */
+      expenses: profitability.operatingExpenses,
+      operatingExpenses: profitability.operatingExpenses,
       productionCost: profitability.productionCost,
       sellingCost: profitability.sellingCost,
       overheadCost: profitability.overheadCost,
@@ -405,9 +432,17 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       })),
     },
     expenses: {
-      total: moneyNumber(totalExpensesMoney),
-      count: expenses.length,
-      average: moneyNumber(expenses.length ? totalExpensesMoney.div(expenses.length) : 0),
+      /** Operating expenses (Selling + Overhead + Unclassified). */
+      total: profitability.operatingExpenses,
+      operatingTotal: profitability.operatingExpenses,
+      recordedTotal: moneyNumber(allExpensesMoney),
+      count: operatingExpenseRows.length,
+      recordedCount: expenses.length,
+      average: moneyNumber(
+        operatingExpenseRows.length
+          ? money(profitability.operatingExpenses).div(operatingExpenseRows.length)
+          : 0,
+      ),
       production,
       selling,
       overhead,
@@ -437,12 +472,24 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       sellingCost: profitability.sellingCost,
       profitAfterSelling: profitability.profitAfterSellingCosts,
       overheadCost: profitability.overheadCost,
-      /** Null-type + PRODUCTION-typed expenses (operating costs outside inventory COGS). */
+      /** Only expenses with a missing cost classification. */
       unclassifiedCost: profitability.unclassifiedExpenses,
+      operatingExpenses: profitability.operatingExpenses,
+      productionExpenses: profitability.productionExpenses,
       netProfit: netProfitNumber,
       grossMargin: hasRevenue ? profitability.grossMargin : null,
       netMargin: hasRevenue ? profitability.netMargin : null,
       inventoryCogs: moneyNumber(inventoryCogs),
+      reconciliation: profitability.reconciliation,
+      expenseTransactions: {
+        selling: expenses.filter((expense) => expense.costType === 'SELLING').map(mapExpenseTxn),
+        overhead: expenses.filter((expense) => expense.costType === 'OVERHEAD').map(mapExpenseTxn),
+        unclassified: expenses.filter((expense) => !expense.costType).map(mapExpenseTxn),
+        operating: operatingExpenseRows.map(mapExpenseTxn),
+        production: expenses
+          .filter((expense) => expense.costType === 'PRODUCTION')
+          .map(mapExpenseTxn),
+      },
     },
     productPerformance: productRows,
     customerReceivables: receivableRows,
