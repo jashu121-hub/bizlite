@@ -30,6 +30,7 @@ export function MobileBottomNavigation({ className }: MobileBottomNavigationProp
   const [moreOpen, setMoreOpen] = React.useState(false)
 
   const moreActive =
+    pathname.startsWith('/cost-pricing') ||
     pathname.startsWith('/cash-bank') ||
     pathname.startsWith('/customers') ||
     pathname.startsWith('/reports') ||

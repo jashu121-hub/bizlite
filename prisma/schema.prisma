@@ -33,6 +33,12 @@ enum CostingMode {
   SIMPLE
 }
 
+enum CostCalculationStatus {
+  DRAFT
+  SAVED
+  APPLIED
+}
+
 enum InventoryDestination {
   RAW_MATERIALS
   WIP
@@ -97,6 +103,7 @@ model UserProfile {
   stockMovements    StockMovement[]
   cashAccounts      CashAccount[]
   cashTransactions  CashTransaction[]
+  costCalculations  ProductCostCalculation[]
 
   @@index([email])
 }
@@ -197,10 +204,40 @@ model Product {
   saleItems      SaleItem[]
   stockMovements StockMovement[]
   expenses       Expense[]
+  costCalculations ProductCostCalculation[]
 
   @@index([userId])
   @@index([userId, isActive])
   @@index([userId, name])
+}
+
+model ProductCostCalculation {
+  id                    String                 @id @default(cuid())
+  userId                String                 @db.Uuid
+  productId             String?
+  name                  String
+  category              String?
+  quantity              Int                    @default(1)
+  unit                  String                 @default("pcs")
+  calculationDate       DateTime               @db.Date
+  notes                 String?
+  status                CostCalculationStatus  @default(DRAFT)
+  payload               Json
+  totalBatchCost        Decimal                @default(0) @db.Decimal(14, 2)
+  costPerUnit           Decimal                @default(0) @db.Decimal(14, 2)
+  suggestedSellingPrice Decimal                @default(0) @db.Decimal(14, 2)
+  grossMarginPct        Decimal                @default(0) @db.Decimal(14, 2)
+  expenseIds            String[]               @default([])
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([productId])
+  @@index([userId, calculationDate])
 }
 
 model Customer {
