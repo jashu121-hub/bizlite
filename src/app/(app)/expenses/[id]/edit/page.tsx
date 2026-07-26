@@ -71,7 +71,7 @@ export default async function EditExpensePage({
 }) {
   const { id } = await params
   const { profile, user } = await requireProfile()
-  const [expense, categories, cashAccounts] = await Promise.all([
+  const [expense, categories, cashAccounts, products] = await Promise.all([
     prisma.expense.findFirst({
       where: { id, userId: user.id },
       include: { category: true },
@@ -80,6 +80,11 @@ export default async function EditExpensePage({
     prisma.cashAccount.findMany({
       where: { userId: user.id, isActive: true },
       select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.product.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
   ])
@@ -92,6 +97,7 @@ export default async function EditExpensePage({
         currency={profile.currency}
         categories={withCurrentCategory(categories, expense.category)}
         cashAccounts={cashAccounts}
+        products={products}
         initial={{
           date: format(expense.date, 'yyyy-MM-dd'),
           categoryId: expense.categoryId,
@@ -103,6 +109,13 @@ export default async function EditExpensePage({
           vendor: expense.vendor ?? '',
           reference: expense.reference ?? '',
           notes: expense.notes ?? '',
+          productId: expense.productId ?? '',
+          productionQuantity: expense.productionQuantity ?? undefined,
+          productionUnit: expense.productionUnit ?? 'pcs',
+          productionUnitCost: expense.productionUnitCost?.toString() ?? '',
+          inventoryDestination: expense.inventoryDestination ?? 'FINISHED_GOODS',
+          productionBatch: expense.productionBatch ?? '',
+          updateInventory: expense.updateInventory,
         }}
         onSubmit={updateExpenseAction.bind(null, id)}
       />

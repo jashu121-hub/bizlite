@@ -28,6 +28,18 @@ enum ExpenseCostType {
   OVERHEAD
 }
 
+enum CostingMode {
+  INVENTORY
+  SIMPLE
+}
+
+enum InventoryDestination {
+  RAW_MATERIALS
+  WIP
+  FINISHED_GOODS
+  NONE
+}
+
 enum StockMovementType {
   OPENING
   SALE
@@ -71,6 +83,8 @@ model UserProfile {
   currency             String   @default("AED")
   setupCompleted       Boolean  @default(false)
   expenseCostDefaults  Json?
+  /** INVENTORY = sale-line unit costs (Method B). SIMPLE = period PRODUCTION expenses as COGS. */
+  costingMode          CostingMode @default(INVENTORY)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -182,6 +196,7 @@ model Product {
   user           UserProfile     @relation(fields: [userId], references: [id], onDelete: Cascade)
   saleItems      SaleItem[]
   stockMovements StockMovement[]
+  expenses       Expense[]
 
   @@index([userId])
   @@index([userId, isActive])
@@ -295,12 +310,21 @@ model Expense {
   vendor        String?
   reference     String?
   notes         String?
+  /** Optional production / inventory link (PRODUCTION cost type). */
+  productId             String?
+  productionQuantity    Int?
+  productionUnit        String?
+  productionUnitCost    Decimal? @db.Decimal(14, 2)
+  inventoryDestination  InventoryDestination?
+  productionBatch       String?
+  updateInventory       Boolean  @default(false)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   user        UserProfile         @relation(fields: [userId], references: [id], onDelete: Cascade)
   category    ExpenseCategoryItem @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   cashAccount CashAccount?        @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  product     Product?            @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([userId, date])
@@ -308,6 +332,7 @@ model Expense {
   @@index([userId, costType])
   @@index([categoryId])
   @@index([cashAccountId])
+  @@index([productId])
 }
 
 model StockMovement {

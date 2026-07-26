@@ -37,6 +37,7 @@ const settingsFormSchema = z.object({
   ownerName: z.string().min(1, 'Owner name is required').max(120),
   phone: z.string().max(40).optional().or(z.literal('')),
   currency: z.string().min(3).max(3),
+  costingMode: z.enum(['INVENTORY', 'SIMPLE']),
 })
 
 type SettingsFormValues = z.infer<typeof settingsFormSchema>
@@ -145,6 +146,36 @@ export function SettingsForm({ defaultValues }: SettingsFormProps) {
                         ))}
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="costingMode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Costing mode</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select costing mode" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="INVENTORY">
+                          Inventory Costing — COGS from sale-line unit costs
+                        </SelectItem>
+                        <SelectItem value="SIMPLE">
+                          Simple Costing — COGS from entered Production Cost expenses
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Do not mix modes. Inventory mode keeps sale-time unit costs. Simple mode uses
+                      period Production Cost expenses as Profit and Loss COGS.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -12,6 +12,7 @@ const settingsSchema = z.object({
   ownerName: z.string().min(1).max(120),
   phone: z.string().max(40).optional().or(z.literal('')),
   currency: z.string().min(3).max(3),
+  costingMode: z.enum(['INVENTORY', 'SIMPLE']).optional(),
 })
 
 export async function completeSetupAction(raw: unknown) {
@@ -53,10 +54,12 @@ export async function updateSettingsAction(raw: unknown) {
         ownerName: parsed.data.ownerName.trim(),
         phone: parsed.data.phone || null,
         currency: parsed.data.currency,
+        ...(parsed.data.costingMode ? { costingMode: parsed.data.costingMode } : {}),
       },
     })
     revalidatePath('/settings')
     revalidatePath('/dashboard')
+    revalidatePath('/reports')
     return ok(undefined, 'Settings saved')
   } catch (error) {
     console.error('updateSettingsAction', error)

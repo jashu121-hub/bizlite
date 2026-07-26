@@ -15,6 +15,7 @@ export type ProfitabilitySaleLine = {
   quantity: number
   /** Sale-time unit cost snapshot. Preferred source for COGS. */
   unitCost?: MoneyInput
+  unitSellingPrice?: MoneyInput
   lineTotal: MoneyInput
   /** Optional legacy field; used only when unitCost snapshot is missing/zero. */
   lineCost?: MoneyInput
@@ -40,10 +41,14 @@ export type CogsBreakdownLine = {
   productId: string | null
   productName: string
   quantity: number
+  unitSellingPrice: number
+  lineSales: number
   unitCost: number
   lineCogs: number
   source: 'unitCostSnapshot' | 'lineCostFallback' | 'zero'
 }
+
+export type CostingModeOption = 'INVENTORY' | 'SIMPLE'
 
 export type ProfitabilityExpense = {
   amount: MoneyInput
@@ -79,6 +84,10 @@ export type SalesProfitabilityResult = {
   productProfitability: ProductProfitabilityRow[]
   /** Line-level inventory COGS detail: quantity × sale-time unit cost. */
   cogsBreakdown: CogsBreakdownLine[]
+  /** Active costing mode used for productionCost / Gross Profit. */
+  costingMode: CostingModeOption
+  /** Sale-line inventory COGS total (always Method B), even when Simple mode is active. */
+  inventoryCogsFromSaleLines: number
   reconciliation: {
     ok: boolean
     expectedGrossProfit: number
@@ -133,8 +142,15 @@ export function calculateSalesProfitability(
   options?: {
     /** Optional live product names keyed by productId (rename-safe labels). */
     productNames?: Map<string, string> | Record<string, string>
+    /**
+     * INVENTORY (default): COGS = Σ sale-line unitCost × qty.
+     * SIMPLE: COGS = period PRODUCTION expense total (entered production cost).
+     * Modes are never mixed silently.
+     */
+    costingMode?: CostingModeOption
   },
 ): SalesProfitabilityResult {
+  const costingMode: CostingModeOption = options?.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY'
   const nameLookup =
     options?.productNames instanceof Map
       ? options.productNames
@@ -156,6 +172,7 @@ export function calculateSalesProfitability(
   >()
 
   let productionCostMoney = money(0)
+  let inventoryCogsFromSaleLinesMoney = money(0)
   const cogsBreakdown: CogsBreakdownLine[] = []
 
   for (const sale of included) {
@@ -193,8 +210,20 @@ export function calculateSalesProfitability(
         : qty !== 0
           ? moneyNumber(divMoney(lineCogs, qty))
           : 0
+      const unitSellingPrice =
+        item.unitSellingPrice !== undefined &&
+        item.unitSellingPrice !== null &&
+        String(item.unitSellingPrice) !== ''
+          ? moneyNumber(item.unitSellingPrice)
+          : qty !== 0
+            ? moneyNumber(divMoney(lineTotal, qty))
+            : 0
 
-      productionCostMoney = productionCostMoney.plus(lineCogs)
+      inventoryCogsFromSaleLinesMoney = inventoryCogsFromSaleLinesMoney.plus(lineCogs)
+      // Inventory mode accumulates sale-line COGS; Simple mode replaces below.
+      if (costingMode === 'INVENTORY') {
+        productionCostMoney = productionCostMoney.plus(lineCogs)
+      }
 
       const productId = item.productId ?? null
       const key = productId ?? `name:${item.productName}`
@@ -210,7 +239,9 @@ export function calculateSalesProfitability(
       row.productName = productName
       row.quantitySold += qty
       row.sales = row.sales.plus(productSales)
-      row.costOfGoodsSold = row.costOfGoodsSold.plus(lineCogs)
+      if (costingMode === 'INVENTORY') {
+        row.costOfGoodsSold = row.costOfGoodsSold.plus(lineCogs)
+      }
       productMap.set(key, row)
 
       cogsBreakdown.push({
@@ -220,6 +251,8 @@ export function calculateSalesProfitability(
         productId,
         productName,
         quantity: qty,
+        unitSellingPrice,
+        lineSales: moneyNumber(productSales),
         unitCost,
         lineCogs: moneyNumber(lineCogs),
         source,
@@ -232,6 +265,14 @@ export function calculateSalesProfitability(
       .filter((expense) => expense.costType === 'PRODUCTION')
       .map((expense) => expense.amount),
   )
+
+  // Simple Costing Mode: entered PRODUCTION expenses are the period COGS.
+  if (costingMode === 'SIMPLE') {
+    productionCostMoney = productionExpensesMoney
+    for (const row of productMap.values()) {
+      row.costOfGoodsSold = money(0)
+    }
+  }
   const sellingCostMoney = addMoney(
     ...expenses
       .filter((expense) => expense.costType === 'SELLING')
@@ -325,6 +366,8 @@ export function calculateSalesProfitability(
     netMargin: moneyNumber(netMarginMoney),
     productProfitability,
     cogsBreakdown,
+    costingMode,
+    inventoryCogsFromSaleLines: moneyNumber(inventoryCogsFromSaleLinesMoney),
     reconciliation: {
       ok: messages.length === 0,
       expectedGrossProfit,

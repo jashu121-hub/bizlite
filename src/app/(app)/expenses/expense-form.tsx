@@ -21,12 +21,14 @@ import { expenseSchema, type ExpenseInput } from '@/lib/validations/expense'
 import { cn } from '@/lib/utils'
 
 type CashAccountOption = { id: string; name: string; type: string }
+type ProductOption = { id: string; name: string }
 
 type ExpenseFormProps = {
   currency: string
   initial?: Partial<ExpenseInput>
   categories: ExpenseCategoryDTO[]
   cashAccounts?: CashAccountOption[]
+  products?: ProductOption[]
   onSubmit: (data: ExpenseInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
@@ -39,6 +41,7 @@ export function ExpenseForm({
   initial,
   categories,
   cashAccounts = [],
+  products = [],
   onSubmit,
   onSuccess,
   onCancel,
@@ -79,12 +82,26 @@ export function ExpenseForm({
       vendor: '',
       reference: '',
       notes: '',
+      productId: '',
+      productionQuantity: undefined,
+      productionUnit: 'pcs',
+      productionUnitCost: '',
+      inventoryDestination: 'FINISHED_GOODS',
+      productionBatch: '',
+      updateInventory: false,
       ...initial,
       costType: initial?.costType || initialCostType,
     },
   })
 
   const categoryId = form.watch('categoryId') as string
+  const costType = form.watch('costType') as ExpenseCostType
+  const cashAccountId = form.watch('cashAccountId') as string
+  const paymentMethod = form.watch('paymentMethod') as string
+  const updateInventory = Boolean(form.watch('updateInventory'))
+  const isCashOrBank =
+    paymentMethod === 'CASH' || paymentMethod === 'BANK_TRANSFER'
+  const isUnlinkedCash = !cashAccountId
   const selected = flat.find((item) => item.id === categoryId)
   const topLevelId = selected?.parentId ?? (selected?.isTransport ? selected.id : selected?.id) ?? initialTopLevelId
   const topLevel = categories.find((item) => item.id === topLevelId)
@@ -244,29 +261,126 @@ export function ExpenseForm({
       </div>
       {cashAccounts.length > 0 ? (
         <Field
-          label="Pay from account (optional)"
+          label="Pay from account"
           help={{
             label: 'Payment Account',
-            text: 'The Cash or Bank account where money is received or paid.',
+            text: 'Select a Cash or Bank account to deduct this expense, or choose Unlinked / Reporting only.',
             guideHref: '/help#cash-and-bank',
           }}
+          error={String(form.formState.errors.cashAccountId?.message ?? '')}
         >
           <select
             className="h-10 w-full rounded-md border bg-transparent px-3"
             {...form.register('cashAccountId')}
           >
-            <option value="">Do not update Cash & Bank</option>
+            <option value="">Unlinked / Reporting only</option>
             {cashAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
               </option>
             ))}
           </select>
-          <p className="text-xs text-zinc-500">
-            Deducts the expense amount from the selected cash or bank account.
-          </p>
+          {isUnlinkedCash ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {isCashOrBank
+                ? 'Payment method is Cash/Bank, but this expense is Unlinked / Reporting only. It will be included in reports but will not reduce any Cash & Bank account.'
+                : 'This expense will be included in reports but will not reduce any Cash & Bank account.'}
+            </p>
+          ) : (
+            <p className="text-xs text-zinc-500">
+              Deducts the expense amount from the selected cash or bank account. Editing reverses the
+              previous ledger posting before applying the new one (no duplicate deduction).
+            </p>
+          )}
         </Field>
       ) : null}
+
+      {costType === 'PRODUCTION' ? (
+        <div className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-900">Production / inventory link (optional)</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Link this production cost to a product and optionally update finished-goods inventory.
+              Leave blank for reporting-only production spending.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Related product">
+              <select
+                className="h-10 w-full rounded-md border bg-white px-3"
+                {...form.register('productId')}
+              >
+                <option value="">No product link</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Quantity produced / purchased">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                placeholder="e.g. 15"
+                {...form.register('productionQuantity', { valueAsNumber: true })}
+              />
+            </Field>
+            <Field label="Unit">
+              <Input placeholder="pcs" {...form.register('productionUnit')} />
+            </Field>
+            <Field label={`Unit cost (${currency})`}>
+              <CurrencyInput
+                currency={currency}
+                value={form.watch('productionUnitCost') || ''}
+                onChange={(value) =>
+                  form.setValue('productionUnitCost', value, {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Inventory destination">
+              <select
+                className="h-10 w-full rounded-md border bg-white px-3"
+                {...form.register('inventoryDestination')}
+              >
+                <option value="FINISHED_GOODS">Finished goods</option>
+                <option value="RAW_MATERIALS">Raw materials</option>
+                <option value="WIP">Work in progress</option>
+                <option value="NONE">None</option>
+              </select>
+            </Field>
+            <Field label="Production batch / reference">
+              <Input placeholder="Batch or job ref" {...form.register('productionBatch')} />
+            </Field>
+          </div>
+          <Field label="Update inventory">
+            <select
+              className="h-10 w-full rounded-md border bg-white px-3"
+              value={updateInventory ? 'yes' : 'no'}
+              onChange={(event) =>
+                form.setValue('updateInventory', event.target.value === 'yes', {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            >
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+            {updateInventory ? (
+              <p className="text-xs text-zinc-500">
+                Yes increases product stock and updates weighted-average costPrice from unit cost (or
+                amount ÷ quantity).
+              </p>
+            ) : null}
+          </Field>
+        </div>
+      ) : null}
+
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Vendor (optional)">
           <Input {...form.register('vendor')} placeholder="Supplier or vendor" />

@@ -21,6 +21,7 @@ export default async function SettingsPage() {
           ownerName: profile.ownerName ?? '',
           phone: profile.phone ?? '',
           currency: profile.currency ?? DEFAULT_CURRENCY,
+          costingMode: profile.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY',
         }}
       />
       <ExpenseCategoryManager

@@ -170,6 +170,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     pendingAgg,
     pendingSalesAll,
     todaySalesRowsRaw,
+    profile,
   ] = await Promise.all([
     sumSales(userId, dashboardRange.startDate, dashboardRange.endDate),
     sumOperatingExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
@@ -250,6 +251,10 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
           orderBy: { createdAt: 'desc' },
         })
       : Promise.resolve(null),
+    prisma.userProfile.findUnique({
+      where: { id: userId },
+      select: { costingMode: true },
+    }),
   ])
 
   // Derive list widgets from period rows — avoids duplicate DB round-trips
@@ -269,12 +274,17 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         customer: s.customer,
       }))
 
+  const costingMode = profile?.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY'
   const periodRevenue = periodSalesAgg.total
-  // Gross profit = Sales − sale-line COGS (same basis as Reports Profit & Loss)
-  const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodSalesAgg.cost))
+  // Align with Reports: Inventory = sale-line COGS; Simple = entered PRODUCTION expenses.
+  const periodCogsForPnL =
+    costingMode === 'SIMPLE' ? periodProductionCost : periodSalesAgg.cost
+  const prevCogsForPnL =
+    costingMode === 'SIMPLE' ? prevProductionCost : prevSales.cost
+  const periodGross = moneyNumber(subMoney(periodSalesAgg.total, periodCogsForPnL))
   // periodExpenseTotal is operating expenses only (excludes PRODUCTION / COGS)
   const periodNet = moneyNumber(subMoney(periodGross, periodExpenseTotal))
-  const prevGross = moneyNumber(subMoney(prevSales.total, prevSales.cost))
+  const prevGross = moneyNumber(subMoney(prevSales.total, prevCogsForPnL))
   const prevNet = moneyNumber(subMoney(prevGross, prevExpenseTotal))
 
   const pendingPayments = moneyNumber(pendingAgg._sum.balancePending || 0)

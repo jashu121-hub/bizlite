@@ -7,11 +7,16 @@ import { prisma } from '@/lib/prisma'
 
 export default async function NewExpensePage() {
   const { profile, user } = await requireProfile()
-  const [categories, cashAccounts] = await Promise.all([
+  const [categories, cashAccounts, products] = await Promise.all([
     listExpenseCategories(user.id, { activeOnlyForForms: true }),
     prisma.cashAccount.findMany({
       where: { userId: user.id, isActive: true },
       select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.product.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
   ])
@@ -22,6 +27,7 @@ export default async function NewExpensePage() {
         currency={profile.currency}
         categories={categories}
         cashAccounts={cashAccounts}
+        products={products}
         onSubmit={createExpenseAction}
       />
     </div>

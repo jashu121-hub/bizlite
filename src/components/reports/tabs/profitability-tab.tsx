@@ -113,6 +113,8 @@ export function ProfitabilityTab({
   const productionExpensesTotal = p.productionExpenses ?? data.expenses.production.total
   const reconciliations = p.cogsReconciliation ?? []
   const productionExpenseAudit = p.productionExpenseAudit ?? []
+  const cogsAudit = p.cogsPeriodAudit
+  const costingMode = p.costingMode ?? cogsAudit?.costingMode ?? 'INVENTORY'
 
   return (
     <div className="space-y-4">
@@ -267,11 +269,107 @@ export function ProfitabilityTab({
           {showCogs ? (
             <div className="space-y-5">
               <p className="text-xs text-zinc-500">
-                COGS uses inventory Method B: quantity sold × sale-time unit cost snapshot. Entered
-                PRODUCTION expenses ({money(productionExpensesTotal)}) are listed separately below
-                and are not added on top of COGS unless they also appear in the product cost
-                calculator that created the unit cost.
+                {costingMode === 'SIMPLE'
+                  ? 'Simple Costing Mode: Profit and Loss COGS equals entered PRODUCTION expenses for the period.'
+                  : 'Inventory Costing Mode: Profit and Loss COGS = quantity sold × sale-time unit cost snapshot on each sale line. Entered PRODUCTION expenses are a separate ledger total and are not added on top of COGS.'}
               </p>
+
+              {cogsAudit ? (
+                <div className="space-y-3 rounded-xl border border-teal-200 bg-teal-50/50 p-3">
+                  <p className="text-xs font-semibold text-teal-950">Period COGS audit</p>
+                  <dl className="space-y-1.5 text-xs">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-600">COGS from sale lines</dt>
+                      <dd className="font-semibold tabular-nums text-zinc-900">
+                        {money(cogsAudit.inventoryCogsFromSaleLines)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-600">Production/Inventory purchases entered</dt>
+                      <dd className="font-semibold tabular-nums text-zinc-900">
+                        {money(cogsAudit.productionPurchasesEntered)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-t border-teal-100 pt-1.5">
+                      <dt className="text-zinc-600">Difference</dt>
+                      <dd className="font-semibold tabular-nums text-zinc-900">
+                        {money(cogsAudit.difference)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-600">COGS used in Profit and Loss</dt>
+                      <dd className="font-semibold tabular-nums text-zinc-900">
+                        {money(cogsAudit.cogsUsedInProfitAndLoss)}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="text-[11px] leading-relaxed text-teal-950/80">
+                    {cogsAudit.differenceExplanation}
+                  </p>
+                </div>
+              ) : null}
+
+              {(cogsAudit?.saleLines?.length ?? 0) > 0 ? (
+                <div>
+                  <p className="mb-2 text-xs font-medium text-zinc-700">
+                    Complete sale-line COGS breakdown
+                  </p>
+                  <ul className="space-y-2">
+                    {cogsAudit!.saleLines.map((line, index) => (
+                      <li
+                        key={`${line.saleId ?? 'sale'}-${line.productId ?? line.productName}-${index}`}
+                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium text-zinc-900">
+                              {line.invoiceNumber ?? 'Sale'} · {line.productName}
+                            </p>
+                            <p className="text-xs text-zinc-500">
+                              {line.date ? formatDate(line.date) : '—'} · Qty {line.quantity} · Sale{' '}
+                              {money(line.unitSellingPrice)}/unit · Cost {money(line.unitCost)}/unit
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-zinc-400">
+                              Line sales {money(line.lineSales)} · Source:{' '}
+                              {line.source === 'unitCostSnapshot'
+                                ? 'sale-line unit cost snapshot'
+                                : line.source === 'lineCostFallback'
+                                  ? 'legacy line cost'
+                                  : 'no cost snapshot'}
+                            </p>
+                          </div>
+                          <p className="shrink-0 tabular-nums font-semibold text-zinc-900">
+                            {money(line.lineCogs)}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {(cogsAudit?.invoiceTotals?.length ?? 0) > 0 ? (
+                    <ul className="mt-2 space-y-1 border-t border-zinc-100 pt-2">
+                      {cogsAudit!.invoiceTotals.map((invoice) => (
+                        <li
+                          key={invoice.saleId ?? invoice.invoiceNumber ?? 'inv'}
+                          className="flex justify-between gap-3 text-xs text-zinc-600"
+                        >
+                          <span>
+                            Invoice {invoice.invoiceNumber ?? '—'} total COGS
+                          </span>
+                          <span className="font-medium tabular-nums text-zinc-900">
+                            {money(invoice.invoiceCogs)}
+                          </span>
+                        </li>
+                      ))}
+                      <li className="flex justify-between gap-3 text-xs font-semibold text-zinc-900">
+                        <span>Total sale-line COGS</span>
+                        <span className="tabular-nums">
+                          {money(cogsAudit!.inventoryCogsFromSaleLines)}
+                        </span>
+                      </li>
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
 
               {reconciliations.length === 0 ? (
                 <p className="text-sm text-zinc-500">No sale lines in this period.</p>

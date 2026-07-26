@@ -309,6 +309,8 @@ describe('calculateSalesProfitability', () => {
     ])
 
     expect(result.productionCost).toBe(375)
+    expect(result.inventoryCogsFromSaleLines).toBe(375)
+    expect(result.costingMode).toBe('INVENTORY')
     expect(result.cogsBreakdown).toEqual([
       {
         saleId: 's1',
@@ -317,11 +319,40 @@ describe('calculateSalesProfitability', () => {
         productId: 'p1',
         productName: 'T-Shirt',
         quantity: 15,
+        unitSellingPrice: 35,
+        lineSales: 525,
         unitCost: 25,
         lineCogs: 375,
         source: 'unitCostSnapshot',
       },
     ])
+  })
+
+  it('uses entered PRODUCTION expenses as COGS in Simple Costing Mode', () => {
+    const result = calculateSalesProfitability(
+      [
+        {
+          totalAmount: 700,
+          items: [
+            {
+              productId: 'p1',
+              productName: 'T-Shirt',
+              quantity: 20,
+              unitCost: 25,
+              lineTotal: 700,
+            },
+          ],
+        },
+      ],
+      [{ amount: 300, costType: 'PRODUCTION' }, { amount: 25, costType: 'SELLING' }, { amount: 75, costType: 'OVERHEAD' }],
+      { costingMode: 'SIMPLE' },
+    )
+
+    expect(result.costingMode).toBe('SIMPLE')
+    expect(result.inventoryCogsFromSaleLines).toBe(500)
+    expect(result.productionCost).toBe(300)
+    expect(result.grossProfit).toBe(400)
+    expect(result.netProfit).toBe(300)
   })
 
   it('does not treat PRODUCTION expenses as Unclassified or fold them into Net Profit', () => {

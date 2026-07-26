@@ -72,7 +72,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
   const dateFilter = prismaDateFilter(range)
   const periodWhere = { userId, ...(dateFilter ? { date: dateFilter } : {}) }
 
-  const [sales, expenses, products, outstandingSales] = await Promise.all([
+  const [sales, expenses, products, outstandingSales, profile] = await Promise.all([
     prisma.sale.findMany({
       where: periodWhere,
       select: {
@@ -93,6 +93,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
             productName: true,
             quantity: true,
             unitCost: true,
+            unitSellingPrice: true,
             lineTotal: true,
             lineCost: true,
             lineProfit: true,
@@ -116,6 +117,13 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         reference: true,
         notes: true,
         cashAccountId: true,
+        productId: true,
+        productionQuantity: true,
+        productionUnit: true,
+        productionUnitCost: true,
+        inventoryDestination: true,
+        productionBatch: true,
+        updateInventory: true,
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
@@ -148,8 +156,13 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       },
       orderBy: { date: 'asc' },
     }),
+    prisma.userProfile.findUnique({
+      where: { id: userId },
+      select: { costingMode: true },
+    }),
   ])
 
+  const costingMode = profile?.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY'
   const totalPaidSales = addMoney(...sales.map((sale) => sale.amountPaid))
   const allExpensesMoney = addMoney(...expenses.map((expense) => expense.amount))
 
@@ -168,6 +181,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         productName: item.productName,
         quantity: item.quantity,
         unitCost: item.unitCost,
+        unitSellingPrice: item.unitSellingPrice,
         lineTotal: item.lineTotal,
         lineCost: item.lineCost,
       })),
@@ -177,7 +191,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       amount: expense.amount,
       costType: expense.costType,
     })),
-    { productNames: productNameById },
+    { productNames: productNameById, costingMode },
   )
 
   if (!profitability.reconciliation.ok) {
@@ -287,19 +301,89 @@ export async function getReportsData(userId: string, params: DashboardDateParams
     }
   })
 
-  const productionExpenseAudit = productionExpenseRows.map((expense) => ({
-    id: expense.id,
-    date: expense.date.toISOString(),
-    description: expense.description,
-    category: expense.category.name,
-    amount: moneyNumber(expense.amount),
-    cashAccountId: expense.cashAccountId,
-    linkedToProduct: false as const,
-    increasesInventoryInSystem: false as const,
-    hasCashLedgerLink: Boolean(expense.cashAccountId),
-    note:
-      'Stored as an Expense with costType PRODUCTION. Not linked to a product, does not create stock movements, and does not update product costPrice or inventory asset value. It is not the source of sale-line unitCost unless that amount also appears in Product.costBreakdown.',
-  }))
+  const productionExpenseAudit = productionExpenseRows.map((expense) => {
+    const linkedProduct = expense.productId ? productById.get(expense.productId) : undefined
+    const linkedToProduct = Boolean(expense.productId)
+    const increasesInventoryInSystem = Boolean(expense.updateInventory && expense.productId)
+    return {
+      id: expense.id,
+      date: expense.date.toISOString(),
+      description: expense.description,
+      category: expense.category.name,
+      amount: moneyNumber(expense.amount),
+      cashAccountId: expense.cashAccountId,
+      paymentMethod: expense.paymentMethod,
+      productId: expense.productId,
+      productName: linkedProduct?.name ?? null,
+      productionQuantity: expense.productionQuantity,
+      productionUnit: expense.productionUnit,
+      productionUnitCost: expense.productionUnitCost
+        ? moneyNumber(expense.productionUnitCost)
+        : null,
+      inventoryDestination: expense.inventoryDestination,
+      productionBatch: expense.productionBatch,
+      updateInventory: expense.updateInventory,
+      linkedToProduct,
+      increasesInventoryInSystem,
+      hasCashLedgerLink: Boolean(expense.cashAccountId),
+      cashLedgerStatus: expense.cashAccountId
+        ? 'Linked to Cash & Bank'
+        : 'Unlinked / Reporting only',
+      note: linkedToProduct
+        ? increasesInventoryInSystem
+          ? 'PRODUCTION expense linked to a product with Update inventory = Yes.'
+          : 'PRODUCTION expense linked to a product but Update inventory = No (reporting metadata only).'
+        : 'Stored as an Expense with costType PRODUCTION. Not linked to a product, does not create stock movements, and does not update product costPrice unless Update inventory is enabled with a product.',
+    }
+  })
+
+  const inventoryCogsFromSaleLines = profitability.inventoryCogsFromSaleLines
+  const productionPurchasesEntered = profitability.productionExpenses
+  const cogsVsProductionDifference = moneyNumber(
+    money(inventoryCogsFromSaleLines).minus(productionPurchasesEntered),
+  )
+  const invoiceCogs = new Map<
+    string,
+    {
+      saleId: string | null
+      invoiceNumber: string | null
+      date: string | null
+      lineCount: number
+      invoiceCogs: number
+      invoiceSales: number
+    }
+  >()
+  for (const line of profitability.cogsBreakdown) {
+    const key = line.saleId ?? line.invoiceNumber ?? 'sale'
+    const current = invoiceCogs.get(key) ?? {
+      saleId: line.saleId,
+      invoiceNumber: line.invoiceNumber,
+      date: line.date,
+      lineCount: 0,
+      invoiceCogs: 0,
+      invoiceSales: 0,
+    }
+    current.lineCount += 1
+    current.invoiceCogs = moneyNumber(money(current.invoiceCogs).plus(line.lineCogs))
+    current.invoiceSales = moneyNumber(money(current.invoiceSales).plus(line.lineSales))
+    invoiceCogs.set(key, current)
+  }
+
+  const cogsPeriodAudit = {
+    costingMode,
+    cogsUsedInProfitAndLoss: profitability.productionCost,
+    inventoryCogsFromSaleLines,
+    productionPurchasesEntered,
+    difference: cogsVsProductionDifference,
+    differenceExplanation:
+      costingMode === 'SIMPLE'
+        ? 'Simple Costing Mode is active: Profit and Loss COGS equals entered PRODUCTION expenses for the period, not sale-line unit costs.'
+        : cogsVsProductionDifference === 0
+          ? 'Sale-line inventory COGS equals entered PRODUCTION expenses for this period.'
+          : `Sale-line inventory COGS (${moneyNumber(inventoryCogsFromSaleLines)}) comes from quantity sold × sale-time unit cost snapshots on each invoice line. Entered PRODUCTION expenses (${moneyNumber(productionPurchasesEntered)}) are a separate expense-ledger total and are not automatically the same measure. The difference of ${moneyNumber(Math.abs(cogsVsProductionDifference))} is not assumed to be opening inventory unless stock records support that.`,
+    invoiceTotals: [...invoiceCogs.values()],
+    saleLines: profitability.cogsBreakdown,
+  }
 
   const operatingExpenseRows = expenses.filter(
     (expense) => expense.costType === 'SELLING' || expense.costType === 'OVERHEAD' || !expense.costType,
@@ -602,6 +686,8 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       reconciliation: profitability.reconciliation,
       cogsBreakdown: profitability.cogsBreakdown,
       cogsReconciliation,
+      cogsPeriodAudit,
+      costingMode,
       productionExpenseAudit,
       expenseTransactions: {
         selling: expenses.filter((expense) => expense.costType === 'SELLING').map(mapExpenseTxn),
