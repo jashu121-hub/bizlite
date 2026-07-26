@@ -6,6 +6,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { deleteCustomerAction } from '@/actions/customers'
+import { FieldHelp } from '@/components/help/field-help'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { ResponsiveDataTable } from '@/components/shared/responsive-data-table'
@@ -80,7 +81,16 @@ export function CustomersTable({
         { key: 'email', header: 'Email', cell: (c) => c.email ?? '—' },
         {
           key: 'balance',
-          header: 'Outstanding',
+          header: (
+            <span className="inline-flex items-center gap-1.5">
+              Outstanding
+              <FieldHelp
+                label="Outstanding Balance"
+                text="The amount the customer has not yet paid."
+                guideHref="/help#customers"
+              />
+            </span>
+          ),
           cell: (c) => <CurrencyDisplay currency={currency} value={c.outstanding} />,
         },
         {

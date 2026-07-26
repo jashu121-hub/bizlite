@@ -117,3 +117,14 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+@media print {
+  .manual-print-root section {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+
+  body {
+    background: white !important;
+  }
+}

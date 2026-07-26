@@ -5,6 +5,7 @@ import { requireProfile } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { addMoney, moneyNumber } from '@/lib/money'
 import { formatDate } from '@/lib/dates'
+import { FieldHelp } from '@/components/help/field-help'
 import { PageHeader } from '@/components/shared/page-header'
 import { SummaryCard } from '@/components/shared/summary-card'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
@@ -71,7 +72,20 @@ export default async function CustomerDetailPage({
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <SummaryCard label="Total sales" value={<CurrencyDisplay value={totalSales} currency={profile.currency} />} />
         <SummaryCard label="Total paid" value={<CurrencyDisplay value={totalPaid} currency={profile.currency} />} />
-        <SummaryCard label="Pending balance" value={<CurrencyDisplay value={pending} currency={profile.currency} />} tone={pending > 0 ? 'warning' : 'default'} />
+        <SummaryCard
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              Pending balance
+              <FieldHelp
+                label="Outstanding Balance"
+                text="The amount the customer has not yet paid."
+                guideHref="/help#customers"
+              />
+            </span>
+          }
+          value={<CurrencyDisplay value={pending} currency={profile.currency} />}
+          tone={pending > 0 ? 'warning' : 'default'}
+        />
         <SummaryCard label="Number of sales" value={String(customer.sales.length)} />
       </div>
 

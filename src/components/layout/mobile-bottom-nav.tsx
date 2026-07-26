@@ -33,7 +33,8 @@ export function MobileBottomNavigation({ className }: MobileBottomNavigationProp
     pathname.startsWith('/cash-bank') ||
     pathname.startsWith('/customers') ||
     pathname.startsWith('/reports') ||
-    pathname.startsWith('/settings')
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/help')
 
   return (
     <>

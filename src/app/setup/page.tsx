@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 
+import { AppBrand } from '@/components/brand/app-brand'
 import { SetupForm } from '@/components/auth/setup-form'
 import { APP_NAME } from '@/lib/constants'
 import { getUserProfile } from '@/lib/auth'
@@ -18,11 +19,14 @@ export default async function SetupPage() {
           <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-700 text-2xl font-bold text-white shadow-lg shadow-teal-700/25">
             B
           </span>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight text-teal-800 dark:text-teal-300">
+          <div className="mt-4 flex justify-center">
+            <AppBrand tone="light" align="center" />
+          </div>
+          <h1 className="mt-3 text-2xl font-bold tracking-tight text-teal-800 dark:text-teal-300">
             Welcome to {APP_NAME}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Tell us about your business to personalize your workspace.
+            Tell us about your business to personalize your {APP_NAME} workspace.
           </p>
         </div>
 

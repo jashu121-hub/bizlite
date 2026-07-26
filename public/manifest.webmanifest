@@ -1,7 +1,7 @@
 {
-  "name": "BizLite",
-  "short_name": "BizLite",
-  "description": "Simple small business management",
+  "name": "BizLite 2026",
+  "short_name": "BizLite 2026",
+  "description": "BizLite 2026 is a simple business management application for managing sales, expenses, products, inventory, customers, cash, bank accounts, and business reports.",
   "start_url": "/dashboard",
   "display": "standalone",
   "orientation": "portrait-primary",

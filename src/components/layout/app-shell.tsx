@@ -5,6 +5,7 @@ import { MobileBottomNavigation } from '@/components/layout/mobile-bottom-nav'
 import { QuickAdd } from '@/components/layout/quick-add'
 import { QuickAddProvider } from '@/components/layout/quick-add-context'
 import { OfflineBanner } from '@/components/shared/offline-banner'
+import { APP_NAME } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 interface AppShellProps {
@@ -40,7 +41,7 @@ export function AppShell({
               {children}
             </div>
             <footer className="px-4 pb-6 text-center text-xs text-zinc-400 md:pb-8">
-              © {new Date().getFullYear()} BizLite. All rights reserved.
+              © {new Date().getFullYear()} {APP_NAME}. All rights reserved.
             </footer>
           </main>
         </div>

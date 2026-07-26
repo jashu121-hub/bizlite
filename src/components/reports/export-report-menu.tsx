@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { APP_NAME } from '@/lib/constants'
 import { formatDate } from '@/lib/dates'
 import {
   expenseCostTypeLabel,
@@ -16,6 +17,8 @@ import {
   paymentStatusLabel,
 } from '@/lib/labels'
 import type { ReportsData } from '@/lib/types/reports'
+
+const EXPORT_PREFIX = 'bizlite-2026'
 
 type CsvValue = string | number | null | undefined
 
@@ -51,7 +54,7 @@ export function ExportReportMenu({
 }) {
   const exportSales = () =>
     downloadCsv(
-      'bizlite-sales-report.csv',
+      `${EXPORT_PREFIX}-sales-report.csv`,
       tableCsv(
         ['Invoice', 'Date', 'Customer', 'Total', 'Paid', 'Outstanding', 'Status'],
         data.sales.rows.map((row) => [
@@ -68,7 +71,7 @@ export function ExportReportMenu({
 
   const exportExpenses = () =>
     downloadCsv(
-      'bizlite-expense-report.csv',
+      `${EXPORT_PREFIX}-expense-report.csv`,
       [
         ...tableCsv(
           [
@@ -106,7 +109,7 @@ export function ExportReportMenu({
 
   const exportProfit = () =>
     downloadCsv(
-      'bizlite-profit-report.csv',
+      `${EXPORT_PREFIX}-profit-report.csv`,
       tableCsv(
         [
           'Sales Revenue',
@@ -137,7 +140,7 @@ export function ExportReportMenu({
 
   const exportProducts = () =>
     downloadCsv(
-      'bizlite-product-performance.csv',
+      `${EXPORT_PREFIX}-product-performance.csv`,
       tableCsv(
         ['Product', 'Quantity sold', 'Revenue', 'Cost', 'Gross profit', 'Margin %', 'Status'],
         data.productPerformance.map((row) => [
@@ -154,7 +157,7 @@ export function ExportReportMenu({
 
   const exportReceivables = () =>
     downloadCsv(
-      'bizlite-customer-receivables.csv',
+      `${EXPORT_PREFIX}-customer-receivables.csv`,
       tableCsv(
         ['Customer', 'Total sales', 'Total paid', 'Outstanding', 'Oldest pending', 'Status'],
         data.customerReceivables.map((row) => [
@@ -170,7 +173,7 @@ export function ExportReportMenu({
 
   const exportInventory = () =>
     downloadCsv(
-      'bizlite-inventory-report.csv',
+      `${EXPORT_PREFIX}-inventory-report.csv`,
       tableCsv(
         [
           'Product',
@@ -199,8 +202,9 @@ export function ExportReportMenu({
 
   const exportComplete = () => {
     const lines = [
-      csvCell(`BizLite Complete Report (${currency})`),
+      csvCell(`${APP_NAME} Complete Report (${currency})`),
       csvCell(`Period: ${data.range.label}`),
+      csvCell(`Generated using ${APP_NAME}`),
       '',
       csvCell('=== Sales ==='),
       ...tableCsv(
@@ -242,7 +246,7 @@ export function ExportReportMenu({
         ],
       ),
     ]
-    downloadCsv('bizlite-complete-report.csv', lines)
+    downloadCsv(`${EXPORT_PREFIX}-complete-report.csv`, lines)
   }
 
   return (

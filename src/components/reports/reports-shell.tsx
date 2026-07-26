@@ -13,6 +13,7 @@ import { ProductsTab } from '@/components/reports/tabs/products-tab'
 import { ProfitabilityTab } from '@/components/reports/tabs/profitability-tab'
 import { ReceivablesTab } from '@/components/reports/tabs/receivables-tab'
 import { SalesTab } from '@/components/reports/tabs/sales-tab'
+import { APP_NAME } from '@/lib/constants'
 import { isReportTab, type ReportTabId, type ReportsData } from '@/lib/types/reports'
 
 export function ReportsShell({
@@ -71,6 +72,7 @@ export function ReportsShell({
         ) : null}
         {activeTab === 'inventory' ? <InventoryTab data={data} currency={currency} /> : null}
       </div>
+      <p className="pt-2 text-center text-xs text-zinc-400">Generated using {APP_NAME}</p>
     </div>
   )
 }

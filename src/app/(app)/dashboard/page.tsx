@@ -20,6 +20,7 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { Button } from '@/components/ui/button'
 import { requireProfile } from '@/lib/auth'
+import { APP_NAME } from '@/lib/constants'
 import { getDashboardData } from '@/lib/queries/dashboard'
 import { type DateFilterPreset, formatDate } from '@/lib/dates'
 import { expenseCategoryLabel } from '@/lib/labels'
@@ -122,7 +123,7 @@ export default async function DashboardPage({
             {timeGreeting()}, {name}! 👋
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Here&apos;s what&apos;s happening with your business today.
+            Welcome back to {APP_NAME}. Here&apos;s what&apos;s happening with your business today.
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

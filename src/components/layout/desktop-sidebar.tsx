@@ -11,12 +11,12 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  HelpCircle,
+  BookOpen,
   Landmark,
 } from 'lucide-react'
 
+import { AppBrand } from '@/components/brand/app-brand'
 import { useLogout } from '@/components/layout/use-logout'
-import { APP_NAME } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/help', label: 'Help & User Manual', icon: BookOpen },
 ] as const
 
 export function DesktopSidebar({
@@ -48,10 +49,7 @@ export function DesktopSidebar({
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">
           B
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-lg font-bold tracking-tight">{APP_NAME}</p>
-          <p className="truncate text-xs text-emerald-100/70">Business made simple.</p>
-        </div>
+        <AppBrand tone="sidebar" showTagline className="min-w-0" />
       </div>
 
       <nav
@@ -102,10 +100,14 @@ export function DesktopSidebar({
           </button>
         </div>
 
-        <p className="flex items-center justify-center gap-1 px-2 text-[11px] text-emerald-100/40">
-          <HelpCircle className="h-3 w-3" />
-          Need help? Check Settings
-        </p>
+        <Link
+          href="/help"
+          prefetch={false}
+          className="flex items-center justify-center gap-1 px-2 text-[11px] text-emerald-100/50 transition-colors hover:text-emerald-50"
+        >
+          <BookOpen className="h-3 w-3" />
+          Open Help & User Manual
+        </Link>
       </div>
     </aside>
   )

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, Landmark, LogOut, Settings, Users } from 'lucide-react'
+import { BarChart3, BookOpen, Landmark, LogOut, Settings, Users } from 'lucide-react'
 
 import { InstallAppButton } from '@/components/shared/install-app-button'
 import { useLogout } from '@/components/layout/use-logout'
@@ -22,6 +22,7 @@ const MORE_ITEMS = [
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/help', label: 'Help & User Manual', icon: BookOpen },
 ] as const
 
 interface MoreMenuProps {

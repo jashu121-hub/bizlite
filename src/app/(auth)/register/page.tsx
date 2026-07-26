@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { friendlyAuthError } from '@/lib/auth-errors'
+import { APP_NAME } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/client'
 import { registerSchema, type RegisterInput } from '@/lib/validations/auth'
 
@@ -61,12 +62,14 @@ export default function RegisterPage() {
       }
 
       if (!data.session) {
-        toast.success('Account created. If email confirmation is on, check your inbox, then sign in.')
+        toast.success(
+          `Your ${APP_NAME} account has been created. If email confirmation is on, check your inbox, then sign in.`,
+        )
         router.push('/login')
         return
       }
 
-      toast.success('Account created')
+      toast.success(`Welcome to ${APP_NAME}. Your account has been created successfully.`)
       router.push('/setup')
       router.refresh()
     } catch (error) {
@@ -81,8 +84,10 @@ export default function RegisterPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-1 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">Create account</h1>
-        <p className="text-sm text-muted-foreground">Start managing your business in minutes</p>
+        <h1 className="text-xl font-semibold tracking-tight">Create your {APP_NAME} account</h1>
+        <p className="text-sm text-muted-foreground">
+          Start managing your business with {APP_NAME} in minutes.
+        </p>
       </div>
 
       <Form {...form}>

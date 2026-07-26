@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { CURRENCIES } from '@/lib/constants'
+import { APP_NAME, CURRENCIES } from '@/lib/constants'
 
 const settingsFormSchema = z.object({
   businessName: z.string().min(1, 'Business name is required').max(120),
@@ -161,7 +161,9 @@ export function SettingsForm({ defaultValues }: SettingsFormProps) {
       <Card>
         <CardHeader>
           <CardTitle>Appearance & app</CardTitle>
-          <CardDescription>Customize how BizLite looks and install it on your device.</CardDescription>
+          <CardDescription>
+            Customize how {APP_NAME} looks and install it on your device.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
@@ -175,7 +177,7 @@ export function SettingsForm({ defaultValues }: SettingsFormProps) {
           <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
             <div>
               <p className="text-sm font-medium">Install app</p>
-              <p className="text-sm text-muted-foreground">Add BizLite to your home screen</p>
+              <p className="text-sm text-muted-foreground">Add {APP_NAME} to your home screen</p>
             </div>
             <InstallAppButton variant="outline" />
           </div>

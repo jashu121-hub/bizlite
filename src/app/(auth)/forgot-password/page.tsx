@@ -16,6 +16,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { APP_NAME } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/client'
 import { forgotPasswordSchema } from '@/lib/validations/auth'
 
@@ -45,7 +46,7 @@ export default function ForgotPasswordPage() {
       }
 
       setSent(true)
-      toast.success('Password reset email sent')
+      toast.success(`${APP_NAME} password reset email sent`)
     } catch {
       toast.error('Unable to send reset email. Please try again.')
     } finally {
@@ -56,11 +57,11 @@ export default function ForgotPasswordPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-1 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">Reset password</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Reset your {APP_NAME} password</h1>
         <p className="text-sm text-muted-foreground">
           {sent
             ? 'Check your inbox for a reset link.'
-            : 'Enter your email and we will send you a reset link.'}
+            : `Enter your email and we will send you a ${APP_NAME} password reset link.`}
         </p>
       </div>
 

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import { createSaleAction, updateSaleAction } from '@/actions/sales'
+import { FieldHelp } from '@/components/help/field-help'
 import { CustomerSelector, type CustomerOption } from '@/components/shared/customer-selector'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { NumberInput } from '@/components/shared/number-input'
@@ -376,7 +377,14 @@ export function SalesForm({
 
       {cashAccounts.length > 0 ? (
         <div className="space-y-2">
-          <label htmlFor="cash-account">Deposit to account (optional)</label>
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="cash-account">Deposit to account (optional)</label>
+            <FieldHelp
+              label="Payment Account"
+              text="The Cash or Bank account where money is received or paid."
+              guideHref="/help#cash-and-bank"
+            />
+          </div>
           <select
             id="cash-account"
             className="h-10 w-full rounded-md border bg-transparent px-3"

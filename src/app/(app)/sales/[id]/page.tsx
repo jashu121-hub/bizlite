@@ -7,6 +7,7 @@ import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { APP_NAME } from '@/lib/constants'
 import { formatDate } from '@/lib/dates'
 export default async function SalePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -20,6 +21,7 @@ export default async function SalePage({ params }: { params: Promise<{ id: strin
     },
   })
   if (!s) notFound()
+  const businessName = profile.businessName?.trim()
   return (
     <div className="space-y-6">
       <div className="print:hidden">
@@ -37,6 +39,9 @@ export default async function SalePage({ params }: { params: Promise<{ id: strin
         <CardContent className="p-6">
           <div className="mb-6 flex justify-between">
             <div>
+              {businessName ? (
+                <p className="mb-1 text-sm font-medium text-teal-800">{businessName}</p>
+              ) : null}
               <h1 className="text-2xl font-bold">Invoice {s.invoiceNumber}</h1>
               <p>{formatDate(s.date)}</p>
             </div>
@@ -66,6 +71,7 @@ export default async function SalePage({ params }: { params: Promise<{ id: strin
               Balance: <CurrencyDisplay value={s.balancePending} currency={profile.currency} />
             </p>
           </div>
+          <p className="mt-8 text-center text-xs text-zinc-400">Generated using {APP_NAME}</p>
         </CardContent>
       </Card>
       <Card>

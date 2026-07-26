@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { ExpenseCostType } from '@prisma/client'
 
+import { FieldHelp } from '@/components/help/field-help'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -242,7 +243,14 @@ export function ExpenseForm({
         </Field>
       </div>
       {cashAccounts.length > 0 ? (
-        <Field label="Pay from account (optional)">
+        <Field
+          label="Pay from account (optional)"
+          help={{
+            label: 'Payment Account',
+            text: 'The Cash or Bank account where money is received or paid.',
+            guideHref: '/help#cash-and-bank',
+          }}
+        >
           <select
             className="h-10 w-full rounded-md border bg-transparent px-3"
             {...form.register('cashAccountId')}
@@ -289,14 +297,19 @@ function Field({
   label,
   error,
   children,
+  help,
 }: {
   label: string
   error?: string
   children: React.ReactNode
+  help?: { label: string; text: string; guideHref: string }
 }) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <div className="flex items-center gap-1.5">
+        <Label>{label}</Label>
+        {help ? <FieldHelp {...help} /> : null}
+      </div>
       {children}
       {error ? (
         <p className="text-sm text-red-600" role="alert">

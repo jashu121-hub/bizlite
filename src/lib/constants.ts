@@ -1,5 +1,11 @@
-export const APP_NAME = 'BizLite'
-export const APP_DESCRIPTION = 'Simple small business management'
+export const APP_NAME = 'BizLite 2026'
+export const APP_NAME_MARK = 'BizLite'
+export const APP_YEAR = '2026'
+export const APP_SHORT_NAME = 'BizLite 2026'
+export const APP_TAGLINE = 'Business Made Simple'
+export const APP_DESCRIPTION =
+  'BizLite 2026 is a simple business management application for managing sales, expenses, products, inventory, customers, cash, bank accounts, and business reports.'
+export const APP_PAGE_TITLE = 'BizLite 2026 | Business Made Simple'
 export const DEFAULT_CURRENCY = 'AED'
 export const THEME_COLOR = '#0f766e'
 export const BACKGROUND_COLOR = '#f4f7f6'

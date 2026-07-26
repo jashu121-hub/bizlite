@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { friendlyAuthError } from '@/lib/auth-errors'
+import { APP_NAME } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/client'
 import { loginSchema, type LoginInput } from '@/lib/validations/auth'
 
@@ -34,7 +35,11 @@ export default function LoginPage() {
     },
   })
 
-  const finishLogin = async (email: string, password: string, welcome = 'Welcome back') => {
+  const finishLogin = async (
+    email: string,
+    password: string,
+    welcome = `Welcome back to ${APP_NAME}`,
+  ) => {
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
@@ -77,8 +82,10 @@ export default function LoginPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-1 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
-        <p className="text-sm text-muted-foreground">Access your business dashboard</p>
+        <h1 className="text-xl font-semibold tracking-tight">Welcome to {APP_NAME}</h1>
+        <p className="text-sm text-muted-foreground">
+          Sign in to manage your business with {APP_NAME}.
+        </p>
       </div>
 
       <Form {...form}>
@@ -150,7 +157,7 @@ export default function LoginPage() {
       </Button>
 
       <p className="text-center text-sm text-muted-foreground">
-        New to BizLite?{' '}
+        New to {APP_NAME}?{' '}
         <Link
           href="/register"
           className="font-medium text-teal-700 hover:text-teal-800 dark:text-teal-400"

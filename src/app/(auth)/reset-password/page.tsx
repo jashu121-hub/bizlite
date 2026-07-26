@@ -17,6 +17,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { APP_NAME } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/client'
 import { resetPasswordSchema } from '@/lib/validations/auth'
 
@@ -89,7 +90,7 @@ export default function ResetPasswordPage() {
         return
       }
 
-      toast.success('Password updated')
+      toast.success(`Your ${APP_NAME} password has been reset`)
       router.push('/dashboard')
       router.refresh()
     } catch {
@@ -102,8 +103,10 @@ export default function ResetPasswordPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-1 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">Set new password</h1>
-        <p className="text-sm text-muted-foreground">Choose a strong password for your account</p>
+        <h1 className="text-xl font-semibold tracking-tight">Set a new {APP_NAME} password</h1>
+        <p className="text-sm text-muted-foreground">
+          Choose a strong password for your {APP_NAME} account.
+        </p>
       </div>
 
       {!ready ? (

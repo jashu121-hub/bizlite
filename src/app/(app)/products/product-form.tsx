@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
+import { FieldHelp } from '@/components/help/field-help'
 import { ProductCostCalculator } from '@/components/products/product-cost-calculator'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { NumberInput } from '@/components/shared/number-input'
@@ -13,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { PRODUCT_CATEGORIES } from '@/lib/constants'
+import { APP_NAME, PRODUCT_CATEGORIES } from '@/lib/constants'
 import { normalizeCostBreakdown, type ProductCostBreakdown } from '@/lib/product-cost'
 import { productSchema, type ProductInput } from '@/lib/validations/product'
 import { cn } from '@/lib/utils'
@@ -146,7 +147,14 @@ export function ProductForm({
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label>Cost price</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Cost price</Label>
+            <FieldHelp
+              label="Cost Price"
+              text="The total cost of producing or purchasing one unit."
+              guideHref="/help#product-costing"
+            />
+          </div>
           <CurrencyInput
             currency={currency}
             value={form.watch('costPrice')}
@@ -157,7 +165,14 @@ export function ProductForm({
           <p className="text-xs text-zinc-500">Inventory cost per unit</p>
         </div>
         <div className="space-y-2">
-          <Label>Selling price</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Selling price</Label>
+            <FieldHelp
+              label="Selling Price"
+              text="The amount charged to the customer for one unit."
+              guideHref="/help#product-costing"
+            />
+          </div>
           <CurrencyInput
             currency={currency}
             value={sellingPrice}
@@ -186,7 +201,34 @@ export function ProductForm({
       />
 
       <div className={cn('grid gap-5', hideOpeningStock ? '' : 'sm:grid-cols-2')}>
-        {hideOpeningStock ? null : field('Opening stock', 'openingStock', 'number')}
+        {hideOpeningStock ? null : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="openingStock">Opening stock</Label>
+              <FieldHelp
+                label="Opening Stock"
+                text={`The quantity available before starting to use ${APP_NAME}.`}
+                guideHref="/help#products-and-inventory"
+              />
+            </div>
+            <NumberInput
+              id="openingStock"
+              integer
+              min={0}
+              placeholder="0"
+              value={form.watch('openingStock') as string | number | undefined}
+              onChange={(value) =>
+                form.setValue('openingStock', value === '' ? '' : Number(value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            />
+            <p className="text-sm text-red-600" role="alert">
+              {String(form.formState.errors.openingStock?.message ?? '')}
+            </p>
+          </div>
+        )}
         {field('Low stock alert level', 'lowStockLevel', 'number')}
       </div>
       {hideOpeningStock ? (

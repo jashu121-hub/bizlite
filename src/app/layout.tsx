@@ -3,7 +3,13 @@ import { Plus_Jakarta_Sans } from 'next/font/google'
 
 import { Providers } from '@/components/providers'
 import { Toaster } from '@/components/ui/sonner'
-import { APP_DESCRIPTION, APP_NAME, THEME_COLOR } from '@/lib/constants'
+import {
+  APP_DESCRIPTION,
+  APP_NAME,
+  APP_PAGE_TITLE,
+  APP_SHORT_NAME,
+  THEME_COLOR,
+} from '@/lib/constants'
 
 import './globals.css'
 
@@ -15,13 +21,22 @@ const plusJakarta = Plus_Jakarta_Sans({
 })
 
 export const metadata: Metadata = {
-  title: APP_NAME,
+  title: {
+    default: APP_PAGE_TITLE,
+    template: `%s | ${APP_NAME}`,
+  },
   description: APP_DESCRIPTION,
-  applicationName: APP_NAME,
+  applicationName: APP_SHORT_NAME,
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: APP_NAME,
+    title: APP_SHORT_NAME,
+  },
+  openGraph: {
+    title: APP_PAGE_TITLE,
+    description: APP_DESCRIPTION,
+    siteName: APP_NAME,
+    type: 'website',
   },
   manifest: '/manifest.webmanifest',
   icons: {

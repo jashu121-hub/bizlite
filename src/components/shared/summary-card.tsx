@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 type SummaryTone = 'default' | 'success' | 'warning' | 'danger' | 'info'
 
 interface SummaryCardProps {
-  label: string
+  label: React.ReactNode
   value: React.ReactNode
   hint?: string
   icon?: LucideIcon

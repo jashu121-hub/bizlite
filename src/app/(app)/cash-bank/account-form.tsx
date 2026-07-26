@@ -7,12 +7,14 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import { createCashAccountAction, updateCashAccountAction } from '@/actions/cash-accounts'
+import { FieldHelp } from '@/components/help/field-help'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { CASH_ACCOUNT_TYPES, CASH_BALANCE_SOURCES } from '@/lib/cash-accounts'
+import { APP_NAME } from '@/lib/constants'
 import { todayInputValue } from '@/lib/dates'
 import {
   createCashAccountSchema,
@@ -133,7 +135,14 @@ export function CashAccountForm(props: CreateProps | EditProps) {
         <>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Opening balance (optional)</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Opening balance (optional)</Label>
+                <FieldHelp
+                  label="Opening Balance"
+                  text={`The amount already in this account before you start using ${APP_NAME}. Leave empty if you are not sure.`}
+                  guideHref="/help#cash-and-bank"
+                />
+              </div>
               <CurrencyInput
                 currency={props.currency}
                 value={openingBalance}
