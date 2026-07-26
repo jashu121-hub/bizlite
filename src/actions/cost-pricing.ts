@@ -454,6 +454,11 @@ export async function addProducedStockFromCalculationAction(raw: {
   }
 }
 
+/**
+ * Record production payment(s) for a saved cost calculation.
+ * Creates PRODUCTION_PAYMENT ledger rows (not operating expenses) and posts cash if selected.
+ * Does not add inventory — use Create Production Batch for that.
+ */
 export async function createProductionExpensesFromCalculationAction(raw: {
   calculationId: string
   expenseDate: string
@@ -461,6 +466,7 @@ export async function createProductionExpensesFromCalculationAction(raw: {
   paymentMethod?: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'OTHER'
   lineIds: string[]
   categoryId: string
+  paymentMode?: 'PAID' | 'UNPAID'
 }) {
   try {
     const { user } = await requireProfile()
@@ -476,10 +482,9 @@ export async function createProductionExpensesFromCalculationAction(raw: {
     )
     if (selected.length === 0) return fail('Select at least one cost component')
 
-    // Prevent duplicate expense creation for the same calculation lines.
     if (calc.expenseIds.length > 0) {
       return fail(
-        'Production expenses were already created for this calculation. Duplicate creation is blocked.',
+        'Production payments were already recorded for this calculation. Duplicate creation is blocked.',
       )
     }
 
@@ -488,13 +493,19 @@ export async function createProductionExpensesFromCalculationAction(raw: {
     })
     if (!category) return fail('Expense category not found')
 
+    const paymentMode = raw.paymentMode === 'UNPAID' ? 'UNPAID' : 'PAID'
     const cashAccountId = raw.cashAccountId || null
-    if (cashAccountId) {
+    if (paymentMode === 'PAID') {
+      if (!cashAccountId) {
+        return fail('Select Cash or Bank for a paid production payment, or choose unpaid')
+      }
       const account = await prisma.cashAccount.findFirst({
         where: { id: cashAccountId, userId: user.id, isActive: true },
       })
       if (!account) return fail('Payment account not found')
     }
+
+    const { postProductionPaymentInTx } = await import('@/lib/services/cash-accounts')
 
     const createdIds: string[] = []
     await prisma.$transaction(async (tx) => {
@@ -506,23 +517,40 @@ export async function createProductionExpensesFromCalculationAction(raw: {
             userId: user.id,
             date: toDateOnly(raw.expenseDate),
             categoryId: category.id,
+            ledgerKind: 'PRODUCTION_PAYMENT',
             costType: 'PRODUCTION',
             description: `${line.name || line.category} · ${calc.name}`.slice(0, 200),
             amount: prismaDecimal(amount),
             paymentMethod: raw.paymentMethod || 'CASH',
-            cashAccountId,
+            cashAccountId: paymentMode === 'PAID' ? cashAccountId : null,
             vendor: null,
             reference: `COSTCALC:${calc.id}:${line.id}`,
-            notes: `From cost calculation ${calc.name}. Product batch qty ${calc.quantity}.`,
+            notes:
+              `Production payment for ${calc.name} (qty ${calc.quantity}). ` +
+              `Not an operating expense — cost is in inventory / COGS when sold.` +
+              (paymentMode === 'UNPAID' ? ' Unpaid / payable.' : ''),
             productId: calc.productId,
             productionQuantity: calc.quantity,
             productionUnit: calc.unit,
             productionUnitCost: prismaDecimal(totals.costPerUnit),
             productionBatch: calc.name,
             updateInventory: false,
+            costCalculationId: calc.id,
           },
         })
         createdIds.push(created.id)
+
+        if (paymentMode === 'PAID' && cashAccountId) {
+          await postProductionPaymentInTx(tx, {
+            userId: user.id,
+            accountId: cashAccountId,
+            amount,
+            date: toDateOnly(raw.expenseDate),
+            expenseId: created.id,
+            reference: `COSTCALC:${calc.id}:${line.id}`,
+            notes: `Production payment · ${calc.name} · ${line.name || line.category}`,
+          })
+        }
       }
 
       await tx.productCostCalculation.update({
@@ -531,18 +559,27 @@ export async function createProductionExpensesFromCalculationAction(raw: {
       })
     })
 
-    if (createdIds.length === 0) return fail('No positive amounts to create as expenses')
+    if (createdIds.length === 0) return fail('No positive amounts to record as payments')
 
     revalidateCostPaths(calc.productId)
+    revalidatePath('/cash-bank')
+    revalidatePath('/expenses')
     return ok(
-      { expenseIds: createdIds, totalAmount: selected.reduce((s, l) => {
-        const amt = totals.lineTotals.find((t) => t.id === l.id)?.total ?? 0
-        return s + amt
-      }, 0) },
-      `Created ${createdIds.length} production expense(s)`,
+      {
+        expenseIds: createdIds,
+        totalAmount: selected.reduce((s, l) => {
+          const amt = totals.lineTotals.find((t) => t.id === l.id)?.total ?? 0
+          return s + amt
+        }, 0),
+      },
+      paymentMode === 'PAID'
+        ? `Recorded ${createdIds.length} production payment(s). Not an operating expense.`
+        : `Recorded ${createdIds.length} unpaid production payable(s). Not an operating expense.`,
     )
   } catch (error) {
     console.error('createProductionExpensesFromCalculationAction', error)
-    return fail('Unable to create production expenses')
+    return fail(
+      error instanceof Error ? error.message : 'Unable to record production payment',
+    )
   }
 }

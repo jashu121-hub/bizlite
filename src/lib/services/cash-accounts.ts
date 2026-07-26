@@ -97,6 +97,42 @@ export async function postPurchasePaymentInTx(
   })
 }
 
+/**
+ * Pay production batch costs from cash/bank.
+ * Does not create an operating expense — cost sits in inventory until sold.
+ */
+export async function postProductionPaymentInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    userId: string
+    accountId: string
+    amount: string | number
+    date: Date
+    expenseId?: string | null
+    stockMovementId?: string | null
+    reference?: string | null
+    notes?: string | null
+  },
+) {
+  const paid = money(input.amount)
+  if (paid.lte(0)) throw new Error('Production payment must be greater than zero')
+  const account = await getOwnedAccount(input.userId, input.accountId, tx)
+  if (money(account.currentBalance).lt(paid)) {
+    throw new Error('Insufficient account balance for this production payment')
+  }
+  return postTransaction(tx, {
+    userId: input.userId,
+    accountId: input.accountId,
+    type: 'PRODUCTION_PAYMENT',
+    date: input.date,
+    amount: paid.negated(),
+    expenseId: input.expenseId,
+    stockMovementId: input.stockMovementId,
+    reference: input.reference,
+    notes: input.notes ?? 'Production payment',
+  })
+}
+
 export async function createCashAccount(userId: string, input: CreateCashAccountInput) {
   return prisma.$transaction(async (tx) => {
     const opening = input.openingBalance === '' ? money(0) : money(input.openingBalance)

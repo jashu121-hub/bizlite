@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import type {
   ExpenseCostType,
+  ExpenseLedgerKind,
   InventoryDestination,
   PaymentMethod,
   Prisma,
@@ -13,6 +14,11 @@ import { prisma } from '@/lib/prisma'
 import { moneyNumber, prismaDecimal } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
 import { applyStockReceipt, tracksInventory } from '@/lib/services/inventory'
+import {
+  DUPLICATE_COST_WARNING,
+  findPotentialDuplicateCosts,
+} from '@/lib/services/cost-duplicate-guard'
+import { postProductionPaymentInTx } from '@/lib/services/cash-accounts'
 import { expenseSchema } from '@/lib/validations/expense'
 
 function revalidateExpensePaths() {
@@ -21,13 +27,15 @@ function revalidateExpensePaths() {
   revalidatePath('/reports')
   revalidatePath('/products')
   revalidatePath('/cash-bank')
+  revalidatePath('/cost-pricing')
 }
 
 async function normalizeExpenseWrite(
   userId: string,
   data: {
     categoryId: string
-    costType: string
+    ledgerKind?: string
+    costType?: string
     vendor?: string
     reference?: string
     notes?: string
@@ -38,6 +46,8 @@ async function normalizeExpenseWrite(
     inventoryDestination?: string
     productionBatch?: string
     updateInventory?: boolean
+    costCalculationId?: string
+    stockMovementId?: string
   },
   options?: { allowArchivedCategoryId?: string | null },
 ) {
@@ -46,22 +56,38 @@ async function normalizeExpenseWrite(
     include: { children: { select: { id: true } } },
   })
   if (!category) throw new Error('Category not found')
-  if (
-    category.isArchived &&
-    category.id !== options?.allowArchivedCategoryId
-  ) {
+  if (category.isArchived && category.id !== options?.allowArchivedCategoryId) {
     throw new Error('This category is archived')
   }
   if (category.isTransport && category.children.length > 0) {
     throw new Error('Select a transport subcategory')
   }
 
-  const costType = (category.parentId && category.defaultCostType
-    ? category.defaultCostType
-    : data.costType) as ExpenseCostType
+  const ledgerKind = (data.ledgerKind || 'OPERATING') as ExpenseLedgerKind
 
-  const isProduction = costType === 'PRODUCTION'
-  const productId = isProduction && data.productId ? data.productId : null
+  if (ledgerKind === 'INVENTORY_PURCHASE') {
+    throw new Error(
+      'Inventory purchases must be recorded with Products → Purchase Stock so they become inventory, not an operating expense.',
+    )
+  }
+
+  const resolvedCostType = (
+    ledgerKind === 'OPERATING'
+      ? category.parentId && category.defaultCostType
+        ? category.defaultCostType
+        : data.costType
+      : ledgerKind === 'PRODUCTION_PAYMENT'
+        ? 'PRODUCTION'
+        : data.costType || 'OVERHEAD'
+  ) as ExpenseCostType | null
+
+  if (ledgerKind === 'OPERATING' && !resolvedCostType) {
+    throw new Error('Select a cost type for operating expenses')
+  }
+
+  const isProductionLink =
+    ledgerKind === 'PRODUCTION_PAYMENT' || resolvedCostType === 'PRODUCTION'
+  const productId = isProductionLink && data.productId ? data.productId : null
   if (productId) {
     const product = await prisma.product.findFirst({
       where: { id: productId, userId },
@@ -70,28 +96,37 @@ async function normalizeExpenseWrite(
     if (!product) throw new Error('Related product was not found')
   }
 
-  const updateInventory = Boolean(isProduction && data.updateInventory && productId)
+  // Production payments never add stock again; operating+PRODUCTION legacy may still.
+  const updateInventory = Boolean(
+    ledgerKind === 'OPERATING' &&
+      resolvedCostType === 'PRODUCTION' &&
+      data.updateInventory &&
+      productId,
+  )
   const destination =
-    isProduction && data.inventoryDestination
+    isProductionLink && data.inventoryDestination
       ? (data.inventoryDestination as InventoryDestination)
       : null
 
   return {
     categoryId: category.id,
-    costType,
+    ledgerKind,
+    costType: resolvedCostType,
     vendor: data.vendor?.trim() || null,
     reference: data.reference?.trim() || null,
     notes: data.notes?.trim() || null,
     productId,
-    productionQuantity: isProduction ? data.productionQuantity ?? null : null,
-    productionUnit: isProduction ? data.productionUnit?.trim() || null : null,
+    productionQuantity: isProductionLink ? data.productionQuantity ?? null : null,
+    productionUnit: isProductionLink ? data.productionUnit?.trim() || null : null,
     productionUnitCost:
-      isProduction && data.productionUnitCost
+      isProductionLink && data.productionUnitCost
         ? prismaDecimal(data.productionUnitCost)
         : null,
     inventoryDestination: destination,
-    productionBatch: isProduction ? data.productionBatch?.trim() || null : null,
+    productionBatch: isProductionLink ? data.productionBatch?.trim() || null : null,
     updateInventory,
+    costCalculationId: data.costCalculationId?.trim() || null,
+    stockMovementId: data.stockMovementId?.trim() || null,
   }
 }
 
@@ -138,6 +173,31 @@ async function applyInventoryFromProductionExpense(
   })
 }
 
+export async function checkExpenseDuplicateAction(raw: unknown) {
+  try {
+    const { user } = await requireProfile()
+    const parsed = expenseSchema.safeParse(raw)
+    if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid expense')
+    const data = parsed.data
+    if (data.ledgerKind !== 'OPERATING') {
+      return ok({ matches: [] as Awaited<ReturnType<typeof findPotentialDuplicateCosts>> })
+    }
+    const matches = await findPotentialDuplicateCosts({
+      userId: user.id,
+      date: data.date,
+      amount: data.amount,
+      vendor: data.vendor,
+      reference: data.reference,
+      costCalculationId: data.costCalculationId,
+      stockMovementId: data.stockMovementId,
+    })
+    return ok({ matches })
+  } catch (error) {
+    console.error('checkExpenseDuplicateAction', error)
+    return fail('Unable to check for duplicate costs')
+  }
+}
+
 export async function createExpenseAction(raw: unknown) {
   try {
     const { user } = await requireProfile()
@@ -145,6 +205,25 @@ export async function createExpenseAction(raw: unknown) {
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid expense')
     const data = parsed.data
     const classified = await normalizeExpenseWrite(user.id, data)
+
+    if (classified.ledgerKind === 'OPERATING' && !data.acknowledgeDuplicate) {
+      const matches = await findPotentialDuplicateCosts({
+        userId: user.id,
+        date: data.date,
+        amount: data.amount,
+        vendor: data.vendor,
+        reference: data.reference,
+        costCalculationId: data.costCalculationId,
+        stockMovementId: data.stockMovementId,
+      })
+      if (matches.length > 0) {
+        return fail(DUPLICATE_COST_WARNING, {
+          code: 'DUPLICATE_COST',
+          duplicates: matches,
+        })
+      }
+    }
+
     const cashAccountId = data.cashAccountId || null
     if (cashAccountId) {
       const account = await prisma.cashAccount.findFirst({
@@ -159,6 +238,7 @@ export async function createExpenseAction(raw: unknown) {
           userId: user.id,
           date: toDateOnly(data.date),
           categoryId: classified.categoryId,
+          ledgerKind: classified.ledgerKind,
           costType: classified.costType,
           description: data.description.trim(),
           amount: prismaDecimal(data.amount),
@@ -174,25 +254,42 @@ export async function createExpenseAction(raw: unknown) {
           inventoryDestination: classified.inventoryDestination,
           productionBatch: classified.productionBatch,
           updateInventory: classified.updateInventory,
+          costCalculationId: classified.costCalculationId,
+          stockMovementId: classified.stockMovementId,
         },
       })
+
       if (cashAccountId) {
-        await tx.cashAccount.update({
-          where: { id: cashAccountId },
-          data: { currentBalance: { decrement: prismaDecimal(data.amount) } },
-        })
-        await tx.cashTransaction.create({
-          data: {
+        if (classified.ledgerKind === 'PRODUCTION_PAYMENT') {
+          await postProductionPaymentInTx(tx, {
             userId: user.id,
             accountId: cashAccountId,
-            type: 'EXPENSE_PAYMENT',
+            amount: data.amount,
             date: toDateOnly(data.date),
-            amount: prismaDecimal(-Number(data.amount)),
             expenseId: created.id,
+            stockMovementId: classified.stockMovementId,
+            reference: classified.reference,
             notes: data.description.trim(),
-          },
-        })
+          })
+        } else {
+          await tx.cashAccount.update({
+            where: { id: cashAccountId },
+            data: { currentBalance: { decrement: prismaDecimal(data.amount) } },
+          })
+          await tx.cashTransaction.create({
+            data: {
+              userId: user.id,
+              accountId: cashAccountId,
+              type: 'EXPENSE_PAYMENT',
+              date: toDateOnly(data.date),
+              amount: prismaDecimal(-Number(data.amount)),
+              expenseId: created.id,
+              notes: data.description.trim(),
+            },
+          })
+        }
       }
+
       if (
         classified.updateInventory &&
         classified.productId &&
@@ -215,7 +312,13 @@ export async function createExpenseAction(raw: unknown) {
       return created
     })
     revalidateExpensePaths()
-    return ok({ id: expense.id }, 'Expense saved')
+    const message =
+      classified.ledgerKind === 'PRODUCTION_PAYMENT'
+        ? 'Production payment recorded (not an operating expense)'
+        : classified.ledgerKind === 'ASSET_PURCHASE'
+          ? 'Asset purchase recorded (not an operating expense)'
+          : 'Expense saved'
+    return ok({ id: expense.id }, message)
   } catch (error) {
     console.error('createExpenseAction', error)
     return fail(error instanceof Error ? error.message : 'Unable to save expense')
@@ -233,6 +336,26 @@ export async function updateExpenseAction(id: string, raw: unknown) {
     const classified = await normalizeExpenseWrite(user.id, data, {
       allowArchivedCategoryId: existing.categoryId,
     })
+
+    if (classified.ledgerKind === 'OPERATING' && !data.acknowledgeDuplicate) {
+      const matches = await findPotentialDuplicateCosts({
+        userId: user.id,
+        date: data.date,
+        amount: data.amount,
+        vendor: data.vendor,
+        reference: data.reference,
+        costCalculationId: data.costCalculationId,
+        stockMovementId: data.stockMovementId,
+        excludeExpenseId: id,
+      })
+      if (matches.length > 0) {
+        return fail(DUPLICATE_COST_WARNING, {
+          code: 'DUPLICATE_COST',
+          duplicates: matches,
+        })
+      }
+    }
+
     const cashAccountId = data.cashAccountId || null
     if (cashAccountId) {
       const account = await prisma.cashAccount.findFirst({
@@ -241,8 +364,6 @@ export async function updateExpenseAction(id: string, raw: unknown) {
       if (!account) return fail('Selected cash/bank account was not found')
     }
 
-    // Inventory updates on edit are not auto-reversed (would risk double stock).
-    // Only apply when newly enabling updateInventory.
     const shouldApplyInventory =
       classified.updateInventory &&
       classified.productId &&
@@ -254,7 +375,6 @@ export async function updateExpenseAction(id: string, raw: unknown) {
         where: { userId: user.id, expenseId: id },
       })
       for (const row of priorCash) {
-        // Reverse signed amount (expense payments are negative → decrement negative = credit).
         await tx.cashAccount.update({
           where: { id: row.accountId },
           data: { currentBalance: { decrement: row.amount } },
@@ -267,6 +387,7 @@ export async function updateExpenseAction(id: string, raw: unknown) {
         data: {
           date: toDateOnly(data.date),
           categoryId: classified.categoryId,
+          ledgerKind: classified.ledgerKind,
           costType: classified.costType,
           description: data.description.trim(),
           amount: prismaDecimal(data.amount),
@@ -282,25 +403,40 @@ export async function updateExpenseAction(id: string, raw: unknown) {
           inventoryDestination: classified.inventoryDestination,
           productionBatch: classified.productionBatch,
           updateInventory: classified.updateInventory,
+          costCalculationId: classified.costCalculationId,
+          stockMovementId: classified.stockMovementId,
         },
       })
 
       if (cashAccountId) {
-        await tx.cashAccount.update({
-          where: { id: cashAccountId },
-          data: { currentBalance: { decrement: prismaDecimal(data.amount) } },
-        })
-        await tx.cashTransaction.create({
-          data: {
+        if (classified.ledgerKind === 'PRODUCTION_PAYMENT') {
+          await postProductionPaymentInTx(tx, {
             userId: user.id,
             accountId: cashAccountId,
-            type: 'EXPENSE_PAYMENT',
+            amount: data.amount,
             date: toDateOnly(data.date),
-            amount: prismaDecimal(-Number(data.amount)),
             expenseId: id,
+            stockMovementId: classified.stockMovementId,
+            reference: classified.reference,
             notes: data.description.trim(),
-          },
-        })
+          })
+        } else {
+          await tx.cashAccount.update({
+            where: { id: cashAccountId },
+            data: { currentBalance: { decrement: prismaDecimal(data.amount) } },
+          })
+          await tx.cashTransaction.create({
+            data: {
+              userId: user.id,
+              accountId: cashAccountId,
+              type: 'EXPENSE_PAYMENT',
+              date: toDateOnly(data.date),
+              amount: prismaDecimal(-Number(data.amount)),
+              expenseId: id,
+              notes: data.description.trim(),
+            },
+          })
+        }
       }
 
       if (shouldApplyInventory && classified.productId && classified.productionQuantity) {

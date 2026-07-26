@@ -23,7 +23,7 @@ import {
   computeDashboardTotalCost,
   reconcileDashboardPnL,
 } from '@/lib/dashboard-total-cost'
-import { isOperatingExpenseCostType } from '@/lib/expense-cost'
+import { isOperatingExpense, isSimpleModeCogsExpense } from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, subMoney } from '@/lib/money'
 import { buildKpiSummaries } from '@/lib/queries/kpi-summaries'
 
@@ -71,7 +71,8 @@ async function sumOperatingExpenses(userId: string, from: Date | null, to: Date 
     where: {
       userId,
       ...(date ? { date } : {}),
-      // Operating expenses only — exclude PRODUCTION / inventory purchases
+      // Only OPERATING ledger — excludes inventory / production payments / assets
+      ledgerKind: 'OPERATING',
       OR: [{ costType: null }, { costType: { in: ['SELLING', 'OVERHEAD'] } }],
     },
     select: { amount: true },
@@ -85,11 +86,33 @@ async function sumProductionExpenses(userId: string, from: Date | null, to: Date
     where: {
       userId,
       ...(date ? { date } : {}),
+      // Legacy SIMPLE COGS source only — never PRODUCTION_PAYMENT ledger rows
+      ledgerKind: 'OPERATING',
       costType: 'PRODUCTION',
     },
     select: { amount: true },
   })
   return moneyNumber(addMoney(...rows.map((row) => row.amount)))
+}
+
+/** Unpaid stock purchases (inventory receipts without a linked purchase payment). */
+async function sumSupplierPayables(userId: string): Promise<number> {
+  const purchases = await prisma.stockMovement.findMany({
+    where: { userId, type: 'PURCHASE' },
+    select: { id: true, totalCost: true },
+  })
+  if (purchases.length === 0) return 0
+  const paid = await prisma.cashTransaction.findMany({
+    where: {
+      userId,
+      type: 'PURCHASE_PAYMENT',
+      stockMovementId: { in: purchases.map((p) => p.id) },
+    },
+    select: { stockMovementId: true },
+  })
+  const paidIds = new Set(paid.map((p) => p.stockMovementId).filter(Boolean))
+  const unpaid = purchases.filter((p) => !paidIds.has(p.id))
+  return moneyNumber(addMoney(...unpaid.map((p) => p.totalCost ?? 0)))
 }
 
 const saleSummarySelect = {
@@ -174,6 +197,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     pendingSalesAll,
     todaySalesRowsRaw,
     profile,
+    supplierPayables,
   ] = await Promise.all([
     sumSales(userId, dashboardRange.startDate, dashboardRange.endDate),
     sumOperatingExpenses(userId, dashboardRange.startDate, dashboardRange.endDate),
@@ -223,6 +247,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
         date: true,
         amount: true,
         costType: true,
+        ledgerKind: true,
         category: { select: { name: true } },
         description: true,
       },
@@ -258,6 +283,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
       where: { id: userId },
       select: { costingMode: true },
     }),
+    sumSupplierPayables(userId),
   ])
 
   // Derive list widgets from period rows — avoids duplicate DB round-trips
@@ -313,11 +339,9 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
   )
   const lowStock = products.filter((p) => p.currentStock <= p.lowStockLevel)
 
-  const operatingExpenseRows = periodExpenses.filter((expense) =>
-    isOperatingExpenseCostType(expense.costType),
-  )
-  const productionExpenseRows = periodExpenses.filter(
-    (expense) => expense.costType === 'PRODUCTION',
+  const operatingExpenseRows = periodExpenses.filter((expense) => isOperatingExpense(expense))
+  const productionExpenseRows = periodExpenses.filter((expense) =>
+    isSimpleModeCogsExpense(expense),
   )
   const totalCostByCategory = totalCostResult.byCategory.map((row) => ({
     name: row.name,
@@ -379,6 +403,7 @@ export async function getDashboardData(userId: string, params: DashboardDatePara
     grossProfit: periodGross,
     netProfit: periodNet,
     pendingPayments,
+    supplierPayables,
     stockValue,
     lowStockCount: lowStock.length,
     periodRevenue,

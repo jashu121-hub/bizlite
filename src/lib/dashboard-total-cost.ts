@@ -1,6 +1,10 @@
 import type { ExpenseCostType } from '@prisma/client'
 
-import { costTypeLabel, isOperatingExpenseCostType } from '@/lib/expense-cost'
+import {
+  costTypeLabel,
+  isOperatingExpense,
+  isSimpleModeCogsExpense,
+} from '@/lib/expense-cost'
 import { addMoney, money, moneyNumber, subMoney, type MoneyInput } from '@/lib/money'
 
 export type DashboardCostExpenseRow = {
@@ -8,6 +12,7 @@ export type DashboardCostExpenseRow = {
   date: Date
   amount: MoneyInput
   costType: ExpenseCostType | null
+  ledgerKind?: string | null
   category: { name: string }
   description: string
 }
@@ -85,8 +90,8 @@ export function computeDashboardTotalCost(input: {
     (a, b) => b.date.getTime() - a.date.getTime() || moneyNumber(b.amount) - moneyNumber(a.amount),
   )
 
-  const productionRows = entries.filter((row) => row.costType === 'PRODUCTION')
-  const operatingRows = entries.filter((row) => isOperatingExpenseCostType(row.costType))
+  const productionRows = entries.filter((row) => isSimpleModeCogsExpense(row))
+  const operatingRows = entries.filter((row) => isOperatingExpense(row))
 
   const productionExpenseLedger = moneyNumber(addMoney(...productionRows.map((r) => r.amount)))
   const sellingCost = moneyNumber(

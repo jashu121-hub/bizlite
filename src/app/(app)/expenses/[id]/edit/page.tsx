@@ -101,6 +101,7 @@ export default async function EditExpensePage({
         initial={{
           date: format(expense.date, 'yyyy-MM-dd'),
           categoryId: expense.categoryId,
+          ledgerKind: expense.ledgerKind,
           costType: expense.costType ?? undefined,
           description: expense.description,
           amount: expense.amount.toString(),
@@ -116,6 +117,8 @@ export default async function EditExpensePage({
           inventoryDestination: expense.inventoryDestination ?? 'FINISHED_GOODS',
           productionBatch: expense.productionBatch ?? '',
           updateInventory: expense.updateInventory,
+          costCalculationId: expense.costCalculationId ?? '',
+          stockMovementId: expense.stockMovementId ?? '',
         }}
         onSubmit={updateExpenseAction.bind(null, id)}
       />

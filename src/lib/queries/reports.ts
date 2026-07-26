@@ -111,6 +111,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
         date: true,
         category: { select: { id: true, name: true, parentId: true, isTransport: true } },
         costType: true,
+        ledgerKind: true,
         description: true,
         amount: true,
         paymentMethod: true,
@@ -223,6 +224,7 @@ export async function getReportsData(userId: string, params: DashboardDateParams
       id: expense.id,
       amount: expense.amount,
       costType: expense.costType,
+      ledgerKind: expense.ledgerKind,
     })),
     { productNames: productNameById, costingMode },
   )

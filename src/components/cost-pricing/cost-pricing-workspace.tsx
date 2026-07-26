@@ -449,6 +449,10 @@ export function CostPricingWorkspace({
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
             Product Cost & Pricing Calculator
           </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Calculate product cost and suggested selling price. Saving a calculation does not reduce
+            profit.
+          </p>
           <p className="text-sm text-zinc-500">
             Work out batch cost, cost per finished unit, and a sensible selling price.
           </p>
@@ -1064,7 +1068,9 @@ export function CostPricingWorkspace({
                     Set Standard Cost & Selling Price
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openExpense}>Create Production Expense</DropdownMenuItem>
+                  <DropdownMenuItem onClick={openExpense}>
+                    Record Production Payment
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => window.print()}>
                     <Printer className="h-4 w-4" />
@@ -1074,15 +1080,15 @@ export function CostPricingWorkspace({
               </DropdownMenu>
             </CardContent>
             <p className="px-6 pb-4 text-xs text-zinc-500">
-              Standard production cost and selling price affect future batches/sales only. Creating a
-              production batch adds stock at unit production cost (weighted average). Historical
-              sales and COGS are never changed.
+              Saving a cost calculation does not reduce profit. The calculated cost becomes inventory
+              cost when stock is added, and the sold portion becomes COGS. Historical sales are never
+              changed.
             </p>
           </Card>
 
           <p className="text-xs text-zinc-500">
-            Product Cost is the cost to make one unit. Production Expense is a cash/expense entry.
-            COGS is the sale-time cost of units sold. These can differ and are not the same value.
+            Product cost → inventory when you add a production batch. Production payment → cash/bank
+            or payable only (not an operating expense). COGS → only when units are sold.
           </p>
         </div>
 
@@ -1553,10 +1559,12 @@ export function CostPricingWorkspace({
       <Dialog open={expenseOpen} onOpenChange={setExpenseOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create production expenses?</DialogTitle>
+            <DialogTitle>Record production payment?</DialogTitle>
             <DialogDescription>
-              Create this expense only if these production costs have not already been recorded in
-              Expenses. Otherwise costs may be duplicated. Total: {money(expensePreviewTotal)}
+              Records the Cash, Bank or unpaid payable movement related to this production batch. It
+              does not create an operating expense because the production cost is included in
+              inventory and will become COGS when the product is sold. Total:{' '}
+              {money(expensePreviewTotal)}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 text-sm">
@@ -1587,7 +1595,7 @@ export function CostPricingWorkspace({
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Payment account (optional)</Label>
+              <Label>Paid from Cash or Bank</Label>
               <Select
                 value={expenseForm.cashAccountId || '__none__'}
                 onValueChange={(v) =>
@@ -1601,7 +1609,7 @@ export function CostPricingWorkspace({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Unlinked / Reporting only</SelectItem>
+                  <SelectItem value="__none__">Unpaid / supplier payable</SelectItem>
                   {cashAccounts.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.name}
@@ -1654,6 +1662,7 @@ export function CostPricingWorkspace({
                   cashAccountId: expenseForm.cashAccountId || undefined,
                   paymentMethod: expenseForm.paymentMethod,
                   lineIds: expenseForm.lineIds,
+                  paymentMode: expenseForm.cashAccountId ? 'PAID' : 'UNPAID',
                 })
                 if (!result.success) {
                   toast.error(result.error)
@@ -1664,11 +1673,11 @@ export function CostPricingWorkspace({
                     h.id === calculationId ? { ...h, expenseIds: result.data.expenseIds } : h,
                   ),
                 )
-                toast.success(result.message || 'Expenses created')
+                toast.success(result.message || 'Production payment recorded')
                 setExpenseOpen(false)
               }}
             >
-              Create expenses
+              Record payment
             </Button>
           </DialogFooter>
         </DialogContent>

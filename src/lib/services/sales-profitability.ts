@@ -53,6 +53,7 @@ export type CostingModeOption = 'INVENTORY' | 'SIMPLE'
 export type ProfitabilityExpense = {
   amount: MoneyInput
   costType?: 'PRODUCTION' | 'SELLING' | 'OVERHEAD' | null
+  ledgerKind?: 'OPERATING' | 'INVENTORY_PURCHASE' | 'PRODUCTION_PAYMENT' | 'ASSET_PURCHASE' | string | null
 }
 
 export type ProductProfitabilityRow = {
@@ -263,13 +264,20 @@ export function calculateSalesProfitability(
     }
   }
 
+  const isOperatingLedger = (expense: ProfitabilityExpense) =>
+    (expense.ledgerKind ?? 'OPERATING') === 'OPERATING'
+
   const productionExpensesMoney = addMoney(
     ...expenses
-      .filter((expense) => expense.costType === 'PRODUCTION')
+      .filter(
+        (expense) =>
+          isOperatingLedger(expense) && expense.costType === 'PRODUCTION',
+      )
       .map((expense) => expense.amount),
   )
 
-  // Simple Costing Mode: entered PRODUCTION expenses are the period COGS.
+  // Simple Costing Mode: entered PRODUCTION operating expenses are the period COGS.
+  // PRODUCTION_PAYMENT ledger rows never count here (they are inventory funding).
   if (costingMode === 'SIMPLE') {
     productionCostMoney = productionExpensesMoney
     for (const row of productMap.values()) {
@@ -278,20 +286,22 @@ export function calculateSalesProfitability(
   }
   const sellingCostMoney = addMoney(
     ...expenses
-      .filter((expense) => expense.costType === 'SELLING')
+      .filter(
+        (expense) => isOperatingLedger(expense) && expense.costType === 'SELLING',
+      )
       .map((expense) => expense.amount),
   )
   const overheadCostMoney = addMoney(
     ...expenses
-      .filter((expense) => expense.costType === 'OVERHEAD')
+      .filter(
+        (expense) => isOperatingLedger(expense) && expense.costType === 'OVERHEAD',
+      )
       .map((expense) => expense.amount),
   )
-  // Unclassified = only expenses with no classification. Never a residual/
-  // balancing figure, and never PRODUCTION expenses (those are tracked
-  // separately; inventory COGS already covers sold-product cost).
+  // Unclassified = only OPERATING expenses with no classification.
   const unclassifiedExpensesMoney = addMoney(
     ...expenses
-      .filter((expense) => !expense.costType)
+      .filter((expense) => isOperatingLedger(expense) && !expense.costType)
       .map((expense) => expense.amount),
   )
 

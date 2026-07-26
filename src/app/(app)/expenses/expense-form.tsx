@@ -1,13 +1,15 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useTransition } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import type { ExpenseCostType } from '@prisma/client'
+import type { ExpenseCostType, ExpenseLedgerKind } from '@prisma/client'
 
 import { FieldHelp } from '@/components/help/field-help'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { CurrencyInput } from '@/components/shared/currency-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { EXPENSE_COST_TYPES, PAYMENT_METHODS } from '@/lib/constants'
 import { todayInputValue } from '@/lib/dates'
-import { suggestCostType } from '@/lib/expense-cost'
+import { EXPENSE_LEDGER_KINDS, suggestCostType } from '@/lib/expense-cost'
 import type { ExpenseCategoryDTO } from '@/lib/expense-categories'
 import { expenseSchema, type ExpenseInput } from '@/lib/validations/expense'
 import { cn } from '@/lib/utils'
@@ -89,12 +91,21 @@ export function ExpenseForm({
       inventoryDestination: 'FINISHED_GOODS',
       productionBatch: '',
       updateInventory: false,
+      acknowledgeDuplicate: false,
       ...initial,
       costType: initial?.costType || initialCostType,
+      ledgerKind: (initial?.ledgerKind as ExpenseLedgerKind | undefined) || 'OPERATING',
     },
   })
 
+  const [dupOpen, setDupOpen] = useState(false)
+  const [dupMatches, setDupMatches] = useState<
+    Array<{ id: string; label: string; href: string }>
+  >([])
+  const pendingPayload = useRef<ExpenseInput | null>(null)
+
   const categoryId = form.watch('categoryId') as string
+  const ledgerKind = form.watch('ledgerKind') as ExpenseLedgerKind
   const costType = form.watch('costType') as ExpenseCostType
   const cashAccountId = form.watch('cashAccountId') as string
   const paymentMethod = form.watch('paymentMethod') as string
@@ -127,14 +138,22 @@ export function ExpenseForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId])
 
-  const submit = (data: ExpenseInput) =>
+  const finishSubmit = (data: ExpenseInput) =>
     startTransition(async () => {
-      if (isTransport && (!selected || selected.isTransport)) {
-        toast.error('Select Inward Transport, Customer Delivery, or General Transport')
-        return
-      }
       const result = await onSubmit(data)
       if (!result.success) {
+        if (result.code === 'DUPLICATE_COST' && result.duplicates?.length) {
+          pendingPayload.current = data
+          setDupMatches(
+            result.duplicates.map((d: { id: string; label: string; href: string }) => ({
+              id: d.id,
+              label: d.label,
+              href: d.href,
+            })),
+          )
+          setDupOpen(true)
+          return
+        }
         toast.error(result.error)
         return
       }
@@ -148,12 +167,64 @@ export function ExpenseForm({
       router.refresh()
     })
 
+  const submit = (data: ExpenseInput) => {
+    if (isTransport && (!selected || selected.isTransport)) {
+      toast.error('Select Inward Transport, Customer Delivery, or General Transport')
+      return
+    }
+    if (data.ledgerKind === 'INVENTORY_PURCHASE') {
+      toast.error('Use Products → Purchase Stock for inventory purchases')
+      router.push('/products')
+      return
+    }
+    finishSubmit({ ...data, acknowledgeDuplicate: false })
+  }
+
   return (
     <form onSubmit={form.handleSubmit(submit)} className={cn('space-y-5', className)}>
+      <div className="rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+        Stock purchases and production costs should not normally be entered as operating expenses.
+        They are recorded as inventory and recognised as COGS when the products are sold.
+      </div>
+
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Date" error={String(form.formState.errors.date?.message ?? '')}>
           <Input type="date" {...form.register('date')} />
         </Field>
+        <Field
+          label="Expense type"
+          error={String(form.formState.errors.ledgerKind?.message ?? '')}
+        >
+          <select
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('ledgerKind')}
+          >
+            {EXPENSE_LEDGER_KINDS.map((kind) => (
+              <option key={kind.value} value={kind.value}>
+                {kind.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-500">
+            {EXPENSE_LEDGER_KINDS.find((k) => k.value === ledgerKind)?.help}
+          </p>
+        </Field>
+      </div>
+
+      {ledgerKind === 'INVENTORY_PURCHASE' ? (
+        <div className="rounded-lg border border-teal-100 bg-teal-50/60 px-3 py-3 text-sm text-teal-900">
+          <p className="font-medium">Use Purchase Stock instead</p>
+          <p className="mt-1 text-xs">
+            Inventory purchases increase stock value and become COGS only when sold. They are not
+            operating expenses.
+          </p>
+          <Button asChild type="button" className="mt-3" variant="secondary" size="sm">
+            <Link href="/products">Go to Products → Purchase Stock</Link>
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Category" error={String(form.formState.errors.categoryId?.message ?? '')}>
           <select
             className="h-10 w-full rounded-md border bg-transparent px-3"
@@ -177,6 +248,17 @@ export function ExpenseForm({
             ))}
           </select>
         </Field>
+        {ledgerKind === 'OPERATING' ? (
+          <div />
+        ) : (
+          <div className="text-xs text-zinc-500 self-end pb-2">
+            {ledgerKind === 'PRODUCTION_PAYMENT'
+              ? 'This payment does not reduce profit. Link the production batch below.'
+              : ledgerKind === 'ASSET_PURCHASE'
+                ? 'Capital purchase — excluded from operating expenses and COGS.'
+                : null}
+          </div>
+        )}
       </div>
 
       {isTransport ? (
@@ -204,7 +286,11 @@ export function ExpenseForm({
         </Field>
       ) : null}
 
-      <Field label="Cost Type" error={String(form.formState.errors.costType?.message ?? '')}>
+      {ledgerKind === 'OPERATING' || ledgerKind === 'PRODUCTION_PAYMENT' ? (
+      <Field
+        label={ledgerKind === 'PRODUCTION_PAYMENT' ? 'Cost classification' : 'Cost Type'}
+        error={String(form.formState.errors.costType?.message ?? '')}
+      >
         <select
           className="h-10 w-full rounded-md border bg-transparent px-3"
           {...form.register('costType')}
@@ -226,6 +312,7 @@ export function ExpenseForm({
           </p>
         )}
       </Field>
+      ) : null}
 
       <Field
         label="Description"
@@ -295,7 +382,8 @@ export function ExpenseForm({
         </Field>
       ) : null}
 
-      {costType === 'PRODUCTION' ? (
+      {ledgerKind === 'PRODUCTION_PAYMENT' ||
+      (ledgerKind === 'OPERATING' && costType === 'PRODUCTION') ? (
         <div className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
           <div>
             <p className="text-sm font-medium text-zinc-900">Production / inventory link (optional)</p>
@@ -357,28 +445,34 @@ export function ExpenseForm({
               <Input placeholder="Batch or job ref" {...form.register('productionBatch')} />
             </Field>
           </div>
-          <Field label="Update inventory">
-            <select
-              className="h-10 w-full rounded-md border bg-white px-3"
-              value={updateInventory ? 'yes' : 'no'}
-              onChange={(event) =>
-                form.setValue('updateInventory', event.target.value === 'yes', {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                })
-              }
-            >
-              <option value="no">No</option>
-              <option value="yes">Yes</option>
-            </select>
-            {updateInventory ? (
-              <p className="text-xs text-zinc-500">
-                Yes increases product stock and updates weighted-average inventory cost. For buying
-                resale stock, prefer Products → Purchase Stock so the payment is recorded as a cash
-                asset swap — not an operating expense. Only sold units become COGS.
-              </p>
-            ) : null}
-          </Field>
+          {ledgerKind === 'OPERATING' ? (
+            <Field label="Update inventory">
+              <select
+                className="h-10 w-full rounded-md border bg-white px-3"
+                value={updateInventory ? 'yes' : 'no'}
+                onChange={(event) =>
+                  form.setValue('updateInventory', event.target.value === 'yes', {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
+              >
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+              </select>
+              {updateInventory ? (
+                <p className="text-xs text-zinc-500">
+                  Prefer Products → Purchase Stock or Cost & Pricing → Create Production Batch.
+                  Updating inventory here can double-count if you also record a production payment.
+                </p>
+              ) : null}
+            </Field>
+          ) : (
+            <p className="text-xs text-zinc-500 sm:col-span-2">
+              Production payments do not add stock again. Use Create Production Batch to add finished
+              units to inventory.
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -402,8 +496,37 @@ export function ExpenseForm({
         >
           Cancel
         </Button>
-        <Button disabled={pending}>{pending ? 'Saving…' : 'Save expense'}</Button>
+        <Button disabled={pending || ledgerKind === 'INVENTORY_PURCHASE'}>
+          {pending ? 'Saving…' : 'Save expense'}
+        </Button>
       </div>
+
+      <ConfirmDialog
+        open={dupOpen}
+        onOpenChange={setDupOpen}
+        title="Possible duplicate cost"
+        description={
+          dupMatches.length
+            ? `This cost may already be recorded through inventory or production. Recording it again as an operating expense may duplicate the cost. Existing: ${dupMatches.map((m) => m.label).join('; ')}`
+            : 'This cost may already be recorded through inventory or production.'
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Continue Anyway"
+        variant="destructive"
+        onConfirm={() => {
+          setDupOpen(false)
+          if (pendingPayload.current) {
+            finishSubmit({ ...pendingPayload.current, acknowledgeDuplicate: true })
+          }
+        }}
+      />
+      {dupOpen && dupMatches[0] ? (
+        <p className="text-center text-xs">
+          <Link href={dupMatches[0].href} className="text-teal-700 underline">
+            View existing record
+          </Link>
+        </p>
+      ) : null}
     </form>
   )
 }

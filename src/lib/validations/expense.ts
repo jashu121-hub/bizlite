@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { dateStringSchema, paymentMethodSchema, requiredPositiveMoneySchema } from './common'
 
 export const expenseCostTypeSchema = z.enum(['PRODUCTION', 'SELLING', 'OVERHEAD'])
+export const expenseLedgerKindSchema = z.enum([
+  'OPERATING',
+  'INVENTORY_PURCHASE',
+  'PRODUCTION_PAYMENT',
+  'ASSET_PURCHASE',
+])
 export const inventoryDestinationSchema = z.enum([
   'RAW_MATERIALS',
   'WIP',
@@ -20,7 +26,8 @@ export const expenseSchema = z
   .object({
     date: dateStringSchema,
     categoryId: z.string().min(1, 'Select a category'),
-    costType: expenseCostTypeSchema,
+    ledgerKind: expenseLedgerKindSchema.default('OPERATING'),
+    costType: expenseCostTypeSchema.optional(),
     description: z.string().min(1, 'Description is required').max(200),
     amount: requiredPositiveMoneySchema,
     paymentMethod: paymentMethodSchema,
@@ -35,9 +42,40 @@ export const expenseSchema = z
     inventoryDestination: inventoryDestinationSchema.optional().or(z.literal('')),
     productionBatch: z.string().max(120).optional().or(z.literal('')),
     updateInventory: z.boolean().optional(),
+    costCalculationId: z.string().optional().or(z.literal('')),
+    stockMovementId: z.string().optional().or(z.literal('')),
+    /** User confirmed duplicate warning */
+    acknowledgeDuplicate: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.updateInventory) {
+    if (data.ledgerKind === 'OPERATING' && !data.costType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select a cost type for operating expenses',
+        path: ['costType'],
+      })
+    }
+
+    if (data.ledgerKind === 'INVENTORY_PURCHASE') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Inventory purchases must be recorded with Products → Purchase Stock, not as an expense',
+        path: ['ledgerKind'],
+      })
+    }
+
+    if (data.ledgerKind === 'PRODUCTION_PAYMENT') {
+      if (!data.productionBatch && !data.costCalculationId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Link a production batch or cost calculation for production payments',
+          path: ['productionBatch'],
+        })
+      }
+    }
+
+    if (data.updateInventory && data.ledgerKind === 'OPERATING') {
       if (!data.productId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -52,6 +90,18 @@ export const expenseSchema = z
           path: ['productionQuantity'],
         })
       }
+    }
+
+    // Production payments and asset purchases never update inventory via expense form
+    if (
+      data.updateInventory &&
+      (data.ledgerKind === 'PRODUCTION_PAYMENT' || data.ledgerKind === 'ASSET_PURCHASE')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This expense type cannot update inventory. Use Production Batch or Purchase Stock.',
+        path: ['updateInventory'],
+      })
     }
   })
 

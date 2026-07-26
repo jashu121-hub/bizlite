@@ -28,6 +28,14 @@ enum ExpenseCostType {
   OVERHEAD
 }
 
+/** Accounting purpose of an Expense row — prevents inventory/production costs from becoming OpEx. */
+enum ExpenseLedgerKind {
+  OPERATING
+  INVENTORY_PURCHASE
+  PRODUCTION_PAYMENT
+  ASSET_PURCHASE
+}
+
 enum CostingMode {
   INVENTORY
   SIMPLE
@@ -85,6 +93,7 @@ enum CashTransactionType {
   SALE_RECEIPT
   EXPENSE_PAYMENT
   PURCHASE_PAYMENT
+  PRODUCTION_PAYMENT
   CUSTOMER_PAYMENT
   BALANCE_ADJUSTMENT
 }
@@ -361,7 +370,10 @@ model Expense {
   userId        String           @db.Uuid
   date          DateTime         @db.Date
   categoryId    String
+  /** P&L cost classification for operating expenses (SELLING / OVERHEAD / legacy PRODUCTION). */
   costType      ExpenseCostType?
+  /** Ledger purpose — only OPERATING reduces profit immediately. */
+  ledgerKind    ExpenseLedgerKind @default(OPERATING)
   description   String
   amount        Decimal          @db.Decimal(14, 2)
   paymentMethod PaymentMethod    @default(CASH)
@@ -377,6 +389,9 @@ model Expense {
   inventoryDestination  InventoryDestination?
   productionBatch       String?
   updateInventory       Boolean  @default(false)
+  /** Links that prevent duplicate recognition of the same business cost. */
+  costCalculationId     String?
+  stockMovementId       String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
@@ -389,9 +404,13 @@ model Expense {
   @@index([userId, date])
   @@index([userId, categoryId])
   @@index([userId, costType])
+  @@index([userId, ledgerKind])
   @@index([categoryId])
   @@index([cashAccountId])
   @@index([productId])
+  @@index([costCalculationId])
+  @@index([stockMovementId])
+  @@index([userId, reference])
 }
 
 model StockMovement {

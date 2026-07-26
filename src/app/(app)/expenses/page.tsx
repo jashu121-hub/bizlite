@@ -77,11 +77,7 @@ export default async function ExpensesPage({
     <div className="space-y-6">
       <PageHeader
         title="Expenses"
-        description={
-          costType === 'PRODUCTION'
-            ? 'Production Cost entries for the selected period.'
-            : 'Track your business spending.'
-        }
+        description="Record operating costs that do not create inventory. Stock purchases and production costs should not normally be entered as operating expenses — they are recorded as inventory and recognised as COGS when sold."
         actions={
           <Button asChild>
             <Link href="/expenses/new">

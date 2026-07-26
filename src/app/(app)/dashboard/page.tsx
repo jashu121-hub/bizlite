@@ -95,7 +95,7 @@ export default async function DashboardPage({
     },
     {
       type: 'pendingPayments' as const,
-      label: 'Pending Payments',
+      label: 'Pending Customer Payments',
       value: data.cards.pendingPayments,
       summary: data.kpiSummaries.pendingPayments,
     },
@@ -104,6 +104,10 @@ export default async function DashboardPage({
       label: 'Stock Value',
       value: data.cards.stockValue,
       badge: stockBadge,
+      subtitle:
+        data.cards.supplierPayables > 0
+          ? `Supplier payables: ${data.cards.supplierPayables.toFixed(2)}`
+          : 'Inventory asset (not an expense)',
       summary: data.kpiSummaries.stockValue,
     },
     {
