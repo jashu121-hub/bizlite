@@ -7,21 +7,34 @@ export type CostLineCategory =
   | 'Manufacturing Overhead'
   | 'Other Production Cost'
 
+export type CostLineMethod = 'qtyUnit' | 'fixedBatch' | 'bulkUsage'
+
 export type CostLine = {
   id: string
   name: string
   category: CostLineCategory
   description: string
+  method: CostLineMethod
+  /** Quantity × Unit Cost */
   quantity: string
+  unit: string
   unitCost: string
-  /** When set (and qty/unit empty), used as fixed line total. */
+  /** Fixed Batch Cost */
   fixedTotal: string
+  /** Bulk Purchase Usage */
+  bulkPurchaseQty: string
+  bulkPurchaseUnit: string
+  bulkPurchaseAmount: string
+  quantityUsed: string
+  usageUnit: string
   includeInUnitCost: boolean
 }
 
 export type OverheadMethod = 'fixed' | 'perUnit' | 'percent'
 
 export type PricingMode = 'markup' | 'margin' | 'manual'
+
+export type WastageMode = 'materialPct' | 'finishedQty'
 
 export type PriceScenario = {
   id: string
@@ -41,12 +54,16 @@ export type CostPricingPayload = {
   productId: string
   name: string
   category: string
+  /** Finished saleable quantity produced */
   quantity: number
   unit: string
   calculationDate: string
   notes: string
   lines: CostLine[]
+  wastageMode: WastageMode
   wastagePct: string
+  /** Damaged / unsaleable finished units (absorbed into saleable unit cost) */
+  finishedWastageQty: string
   contingencyPct: string
   additionalFixedCost: string
   overheadMethod: OverheadMethod
@@ -58,6 +75,20 @@ export type CostPricingPayload = {
   manualSellingPrice: string
   sellingCosts: SellingCosts
   scenarios: PriceScenario[]
+}
+
+export type LineCostDetail = {
+  id: string
+  total: number
+  method: CostLineMethod
+  bulkUnitCost: number | null
+  quantityConsumed: number | null
+  quantityConsumedUnit: string | null
+  remainingQty: number | null
+  remainingValue: number | null
+  bulkPurchaseValue: number
+  conversionError: string | null
+  usageExceedsPurchase: boolean
 }
 
 export type CostPricingTotals = {
@@ -74,7 +105,11 @@ export type CostPricingTotals = {
   additionalFixedCost: number
   allocatedOverhead: number
   totalBatchCost: number
+  /** Finished saleable quantity used as divisor */
   quantity: number
+  /** Manufactured total when finished wastage mode is used */
+  manufacturedQuantity: number
+  finishedWastageQty: number
   costPerUnit: number
   suggestedSellingPrice: number
   profitPerUnit: number
@@ -86,6 +121,9 @@ export type CostPricingTotals = {
   sellingCostsPerUnit: number
   productGrossProfit: number
   profitAfterSellingCosts: number
-  lineTotals: { id: string; total: number }[]
+  lineTotals: LineCostDetail[]
+  bulkPurchaseValue: number
+  costConsumedInBatch: number
+  unusedMaterialValue: number
   validation: { ok: boolean; messages: string[] }
 }

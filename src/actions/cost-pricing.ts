@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { moneyNumber, prismaDecimal } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
 import { computeCostPricing } from '@/lib/cost-pricing/compute'
+import { createDefaultPayload } from '@/lib/cost-pricing/defaults'
 import { payloadToProductCostBreakdown } from '@/lib/cost-pricing/map-to-product'
 import type { CostPricingPayload } from '@/lib/cost-pricing/types'
 import { normalizeCostBreakdown } from '@/lib/product-cost'
@@ -27,12 +28,17 @@ const payloadSchema = z.object({
   productId: z.string().optional().or(z.literal('')),
   name: z.string().min(1, 'Calculation name is required').max(160),
   category: z.string().max(120).optional().or(z.literal('')),
-  quantity: z.coerce.number().int().positive('Quantity produced must be greater than zero'),
+  quantity: z.coerce
+    .number()
+    .int()
+    .positive('Finished quantity produced must be greater than zero'),
   unit: z.string().min(1).max(40),
   calculationDate: z.string().min(1),
   notes: z.string().max(2000).optional().or(z.literal('')),
   lines: z.array(z.any()).min(1, 'Add at least one cost component'),
+  wastageMode: z.enum(['materialPct', 'finishedQty']).optional(),
   wastagePct: z.string().optional().or(z.literal('')),
+  finishedWastageQty: z.string().optional().or(z.literal('')),
   contingencyPct: z.string().optional().or(z.literal('')),
   additionalFixedCost: z.string().optional().or(z.literal('')),
   overheadMethod: z.enum(['fixed', 'perUnit', 'percent']),
@@ -60,7 +66,7 @@ const payloadSchema = z.object({
 
 function asPayload(raw: unknown): CostPricingPayload {
   const parsed = payloadSchema.parse(raw)
-  return parsed as CostPricingPayload
+  return createDefaultPayload(parsed as Partial<CostPricingPayload>)
 }
 
 export async function listCostCalculationsAction() {

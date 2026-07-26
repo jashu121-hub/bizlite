@@ -51,11 +51,19 @@ import {
 } from '@/lib/cost-pricing/compute'
 import {
   COST_CATEGORIES,
+  COST_LINE_METHODS,
   UNIT_OPTIONS,
   createDefaultPayload,
   createEmptyCostLine,
 } from '@/lib/cost-pricing/defaults'
-import type { CostLine, CostPricingPayload, PricingMode } from '@/lib/cost-pricing/types'
+import type {
+  CostLine,
+  CostLineMethod,
+  CostPricingPayload,
+  PricingMode,
+  WastageMode,
+} from '@/lib/cost-pricing/types'
+import { unitLabel } from '@/lib/cost-pricing/units'
 import { PRODUCT_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -284,7 +292,7 @@ export function CostPricingWorkspace({
       return
     }
     setCalculationId(result.data.id)
-    setPayload({ ...createDefaultPayload(), ...result.data.payload })
+    setPayload(createDefaultPayload(result.data.payload))
     setShowHistory(false)
     toast.success('Calculation loaded')
   }
@@ -535,15 +543,25 @@ export function CostPricingWorkspace({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="qty">Quantity produced</Label>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="qty">Finished quantity produced</Label>
                 <Input
                   id="qty"
                   type="number"
                   min={1}
                   value={payload.quantity || ''}
-                  onChange={(e) => update('quantity', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                  onChange={(e) =>
+                    update('quantity', Math.max(0, Math.floor(Number(e.target.value) || 0)))
+                  }
                 />
+                <p className="text-xs text-zinc-500">
+                  Enter the total number of finished saleable units produced from this calculation.
+                  Example: if the batch produces 15 T-shirts, enter 15.
+                </p>
+                <p className="text-xs text-amber-700/90">
+                  Enter the actual number of good, saleable units produced. Damaged or wasted units
+                  should not normally be included.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Unit of measurement</Label>
@@ -553,8 +571,8 @@ export function CostPricingWorkspace({
                   </SelectTrigger>
                   <SelectContent>
                     {UNIT_OPTIONS.map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
+                      <SelectItem key={u.value} value={u.value}>
+                        {u.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -586,7 +604,8 @@ export function CostPricingWorkspace({
               <div>
                 <CardTitle>Cost components</CardTitle>
                 <CardDescription>
-                  Line total = Quantity × Unit cost. Or enter a fixed total amount.
+                  Choose how each line is calculated. Only cost consumed by this batch is included —
+                  unused bulk purchase value is excluded.
                 </CardDescription>
               </div>
               <Button
@@ -596,103 +615,282 @@ export function CostPricingWorkspace({
                 onClick={() =>
                   setPayload((prev) => ({
                     ...prev,
-                    lines: [...prev.lines, createEmptyCostLine('Other Production Cost', '')],
+                    lines: [
+                      ...prev.lines,
+                      createEmptyCostLine('Other Production Cost', '', 'fixedBatch'),
+                    ],
                   }))
                 }
               >
                 <Plus className="h-4 w-4" /> Add line
               </Button>
             </CardHeader>
-            <CardContent className="space-y-3 overflow-x-auto">
+            <CardContent className="space-y-4">
               {payload.lines.map((line) => {
-                const total = totals.lineTotals.find((t) => t.id === line.id)?.total ?? 0
+                const detail = totals.lineTotals.find((t) => t.id === line.id)
+                const total = detail?.total ?? 0
+                const method = line.method || 'fixedBatch'
                 return (
                   <div
                     key={line.id}
-                    className="grid min-w-[720px] grid-cols-[1.2fr_1fr_1fr_0.7fr_0.9fr_0.9fr_0.7fr_auto] items-end gap-2 rounded-lg border border-zinc-100 p-3"
+                    className="space-y-3 rounded-lg border border-zinc-100 p-3"
                   >
-                    <div className="space-y-1">
-                      <Label className="text-xs">Cost component</Label>
-                      <Input
-                        value={line.name}
-                        onChange={(e) => updateLine(line.id, { name: e.target.value })}
-                      />
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Cost component</Label>
+                        <Input
+                          value={line.name}
+                          onChange={(e) => updateLine(line.id, { name: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Category</Label>
+                        <Select
+                          value={line.category}
+                          onValueChange={(v) =>
+                            updateLine(line.id, { category: v as CostLine['category'] })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {COST_CATEGORIES.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Calculation method</Label>
+                        <Select
+                          value={method}
+                          onValueChange={(v) =>
+                            updateLine(line.id, { method: v as CostLineMethod })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {COST_LINE_METHODS.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Description</Label>
+                        <Input
+                          value={line.description}
+                          onChange={(e) => updateLine(line.id, { description: e.target.value })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Category</Label>
-                      <Select
-                        value={line.category}
-                        onValueChange={(v) =>
-                          updateLine(line.id, { category: v as CostLine['category'] })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {COST_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Description</Label>
-                      <Input
-                        value={line.description}
-                        onChange={(e) => updateLine(line.id, { description: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Qty</Label>
-                      <Input
-                        value={line.quantity}
-                        onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Unit cost</Label>
-                      <CurrencyInput
-                        currency={currency}
-                        value={line.unitCost}
-                        onChange={(v) => updateLine(line.id, { unitCost: v, fixedTotal: v ? '' : line.fixedTotal })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Fixed / total</Label>
-                      <CurrencyInput
-                        currency={currency}
-                        value={line.fixedTotal}
-                        onChange={(v) =>
-                          updateLine(line.id, {
-                            fixedTotal: v,
-                            unitCost: v ? '' : line.unitCost,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Include</Label>
-                      <div className="flex h-10 items-center gap-2">
+
+                    {method === 'qtyUnit' ? (
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Quantity used</Label>
+                          <Input
+                            value={line.quantity}
+                            onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Unit</Label>
+                          <Select
+                            value={line.unit || 'pcs'}
+                            onValueChange={(v) => updateLine(line.id, { unit: v })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {UNIT_OPTIONS.map((u) => (
+                                <SelectItem key={u.value} value={u.value}>
+                                  {u.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Cost per unit</Label>
+                          <CurrencyInput
+                            currency={currency}
+                            value={line.unitCost}
+                            onChange={(v) => updateLine(line.id, { unitCost: v })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Line cost</Label>
+                          <p className="flex h-10 items-center text-sm font-medium tabular-nums">
+                            {money(total)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {method === 'fixedBatch' ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Total cost used for this batch</Label>
+                          <CurrencyInput
+                            currency={currency}
+                            value={line.fixedTotal}
+                            onChange={(v) => updateLine(line.id, { fixedTotal: v })}
+                          />
+                          <p className="text-xs text-zinc-500">
+                            Not divided here — included in Total Batch Cost, then ÷ finished
+                            quantity.
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Line cost</Label>
+                          <p className="flex h-10 items-center text-sm font-medium tabular-nums">
+                            {money(total)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {method === 'bulkUsage' ? (
+                      <div className="space-y-3">
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Bulk purchase quantity</Label>
+                            <Input
+                              value={line.bulkPurchaseQty}
+                              onChange={(e) =>
+                                updateLine(line.id, { bulkPurchaseQty: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Purchase unit</Label>
+                            <Select
+                              value={line.bulkPurchaseUnit || 'm'}
+                              onValueChange={(v) => updateLine(line.id, { bulkPurchaseUnit: v })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {UNIT_OPTIONS.map((u) => (
+                                  <SelectItem key={u.value} value={u.value}>
+                                    {u.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Total bulk purchase amount</Label>
+                            <CurrencyInput
+                              currency={currency}
+                              value={line.bulkPurchaseAmount}
+                              onChange={(v) => updateLine(line.id, { bulkPurchaseAmount: v })}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Quantity used for this batch</Label>
+                            <Input
+                              value={line.quantityUsed}
+                              onChange={(e) =>
+                                updateLine(line.id, { quantityUsed: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Usage unit</Label>
+                            <Select
+                              value={line.usageUnit || line.bulkPurchaseUnit || 'm'}
+                              onValueChange={(v) => updateLine(line.id, { usageUnit: v })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {UNIT_OPTIONS.map((u) => (
+                                  <SelectItem key={u.value} value={u.value}>
+                                    {u.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Calculated cost used</Label>
+                            <p className="flex h-10 items-center text-sm font-semibold tabular-nums text-teal-800">
+                              {money(total)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid gap-2 rounded-md bg-zinc-50 p-3 text-xs text-zinc-600 sm:grid-cols-2 lg:grid-cols-5">
+                          <div>
+                            <p className="text-zinc-400">Purchase unit cost</p>
+                            <p className="font-medium tabular-nums text-zinc-800">
+                              {money(detail?.bulkUnitCost ?? 0)}/
+                              {unitLabel(line.usageUnit || line.bulkPurchaseUnit || 'm')}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-400">Quantity consumed</p>
+                            <p className="font-medium tabular-nums text-zinc-800">
+                              {detail?.quantityConsumed ?? 0}{' '}
+                              {unitLabel(line.usageUnit || 'm')}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-400">Batch cost</p>
+                            <p className="font-medium tabular-nums text-zinc-800">{money(total)}</p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-400">Remaining quantity</p>
+                            <p className="font-medium tabular-nums text-zinc-800">
+                              {detail?.remainingQty ?? 0} {unitLabel(line.usageUnit || 'm')}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-400">Remaining value</p>
+                            <p className="font-medium tabular-nums text-zinc-800">
+                              {money(detail?.remainingValue ?? 0)}
+                            </p>
+                          </div>
+                          {detail?.conversionError || detail?.usageExceedsPurchase ? (
+                            <p className="text-amber-700 sm:col-span-2 lg:col-span-5">
+                              {detail.conversionError ||
+                                'Quantity used cannot exceed available bulk quantity.'}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-between gap-3 border-t border-zinc-100 pt-2">
+                      <div className="flex items-center gap-2">
                         <Switch
                           checked={line.includeInUnitCost}
                           onCheckedChange={(v) => updateLine(line.id, { includeInUnitCost: v })}
                         />
-                        <span className="text-xs tabular-nums text-zinc-600">{money(total)}</span>
+                        <span className="text-xs text-zinc-600">Include in unit cost</span>
                       </div>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="text-red-600"
+                        onClick={() => removeLine(line.id)}
+                        aria-label="Delete line"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="text-red-600"
-                      onClick={() => removeLine(line.id)}
-                      aria-label="Delete line"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 )
               })}
@@ -702,17 +900,53 @@ export function CostPricingWorkspace({
           <Card>
             <CardHeader>
               <CardTitle>Wastage and extra cost</CardTitle>
-              <CardDescription>Optional percentages applied to eligible production cost.</CardDescription>
+              <CardDescription>
+                Material wastage adds cost. Finished-product wastage reduces saleable quantity so
+                damaged units are absorbed by good units.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label>Wastage %</Label>
-                <Input
-                  value={payload.wastagePct}
-                  onChange={(e) => update('wastagePct', pct(e.target.value))}
-                  placeholder="0"
-                />
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Wastage method</Label>
+                <Select
+                  value={payload.wastageMode || 'materialPct'}
+                  onValueChange={(v) => update('wastageMode', v as WastageMode)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="materialPct">Material wastage percentage</SelectItem>
+                    <SelectItem value="finishedQty">Finished-product wastage quantity</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              {(payload.wastageMode || 'materialPct') === 'materialPct' ? (
+                <div className="space-y-2">
+                  <Label>Material wastage %</Label>
+                  <Input
+                    value={payload.wastagePct}
+                    onChange={(e) => update('wastagePct', pct(e.target.value))}
+                    placeholder="0"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Damaged / unsaleable finished units</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={payload.finishedWastageQty}
+                    onChange={(e) => update('finishedWastageQty', e.target.value)}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Unit cost = Total Batch Cost ÷ finished saleable quantity (
+                    {totals.quantity}). Manufactured total shown as{' '}
+                    {totals.manufacturedQuantity} (saleable + damaged).
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Contingency %</Label>
                 <Input
@@ -721,7 +955,7 @@ export function CostPricingWorkspace({
                   placeholder="0"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 sm:col-span-2">
                 <Label>Additional fixed production cost</Label>
                 <CurrencyInput
                   currency={currency}
@@ -808,13 +1042,58 @@ export function CostPricingWorkspace({
               <div className="my-2 border-t border-teal-100" />
               <SummaryRow label="Total Batch Cost" value={money(totals.totalBatchCost)} emphasize />
               <SummaryRow
-                label="Quantity Produced"
-                value={`${totals.quantity} ${payload.unit}`}
+                label="Finished Quantity Produced"
+                value={`${totals.quantity} ${unitLabel(payload.unit)}`}
               />
-              <SummaryRow label="Cost Per Unit" value={money(totals.costPerUnit)} emphasize />
+              <SummaryRow
+                label="Cost Per Finished Unit"
+                value={money(totals.costPerUnit)}
+                emphasize
+              />
+              <p className="pt-1 text-[11px] text-zinc-500">
+                Cost Per Finished Unit = Total Batch Cost ÷ Finished Quantity Produced
+              </p>
               {!totals.validation.ok ? (
                 <p className="pt-2 text-xs text-amber-700">{totals.validation.messages[0]}</p>
               ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Batch cost summary</CardTitle>
+              <CardDescription>
+                Separates bulk purchase value from cost actually consumed in this batch.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <SummaryRow label="Bulk purchase value" value={money(totals.bulkPurchaseValue)} />
+              <SummaryRow
+                label="Cost consumed in this batch"
+                value={money(totals.costConsumedInBatch)}
+              />
+              <SummaryRow
+                label="Unused material value"
+                value={money(totals.unusedMaterialValue)}
+              />
+              <SummaryRow label="Direct labour" value={money(totals.directLabourCost)} />
+              <SummaryRow label="Packaging" value={money(totals.packagingCost)} />
+              <SummaryRow label="Transportation" value={money(totals.transportationCost)} />
+              <SummaryRow
+                label="Other production costs"
+                value={money(totals.otherDirectCost)}
+              />
+              <div className="my-2 border-t border-zinc-100" />
+              <SummaryRow label="Total batch cost" value={money(totals.totalBatchCost)} emphasize />
+              <SummaryRow
+                label="Finished quantity produced"
+                value={`${totals.quantity} ${unitLabel(payload.unit)}`}
+              />
+              <SummaryRow
+                label="Cost per finished unit"
+                value={money(totals.costPerUnit)}
+                emphasize
+              />
             </CardContent>
           </Card>
 
@@ -1087,7 +1366,7 @@ export function CostPricingWorkspace({
       <div className="fixed inset-x-0 bottom-16 z-30 border-t border-teal-100 bg-white/95 px-4 py-2 shadow-lg backdrop-blur print:hidden md:bottom-0 lg:hidden">
         <div className="mx-auto flex max-w-lg items-center justify-between gap-3 text-sm">
           <div>
-            <p className="text-xs text-zinc-500">Cost / unit</p>
+            <p className="text-xs text-zinc-500">Cost / finished unit</p>
             <p className="font-semibold tabular-nums text-teal-800">{money(totals.costPerUnit)}</p>
           </div>
           <div className="text-right">
@@ -1146,7 +1425,7 @@ export function CostPricingWorkspace({
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Quantity produced</Label>
+              <Label>Finished quantity produced</Label>
               <Input
                 value={stockForm.quantity}
                 onChange={(e) => setStockForm((s) => ({ ...s, quantity: e.target.value }))}
