@@ -33,6 +33,12 @@ enum CostingMode {
   SIMPLE
 }
 
+enum ProductType {
+  RESALE
+  MANUFACTURED
+  SERVICE
+}
+
 enum CostCalculationStatus {
   DRAFT
   SAVED
@@ -52,6 +58,7 @@ enum StockMovementType {
   SALE_REVERSAL
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
+  PRODUCTION_RECEIPT
 }
 
 enum CashAccountType {
@@ -91,6 +98,8 @@ model UserProfile {
   expenseCostDefaults  Json?
   /** INVENTORY = sale-line unit costs (Method B). SIMPLE = period PRODUCTION expenses as COGS. */
   costingMode          CostingMode @default(INVENTORY)
+  /** When false (default), stock-tracked products cannot be sold below available qty. */
+  allowNegativeStock   Boolean     @default(false)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -184,21 +193,29 @@ model ExpenseCategoryItem {
 }
 
 model Product {
-  id             String   @id @default(cuid())
-  userId         String   @db.Uuid
+  id             String      @id @default(cuid())
+  userId         String      @db.Uuid
   name           String
   category       String
   sku            String?
-  costPrice      Decimal  @db.Decimal(14, 2)
-  sellingPrice   Decimal  @db.Decimal(14, 2)
-  openingStock   Int      @default(0)
-  currentStock   Int      @default(0)
-  lowStockLevel  Int      @default(5)
+  productType    ProductType @default(RESALE)
+  unitOfMeasure  String      @default("pcs")
+  /** Current weighted-average inventory cost (valuation + COGS source). */
+  costPrice      Decimal     @db.Decimal(14, 2)
+  /** Optional estimated purchase cost for future stock receipts (resale). */
+  defaultPurchaseCost Decimal @default(0) @db.Decimal(14, 2)
+  /** Latest standard / suggested production unit cost (manufactured). */
+  standardProductionCost Decimal @default(0) @db.Decimal(14, 2)
+  /** Default suggested selling price for future sales only. */
+  sellingPrice   Decimal     @db.Decimal(14, 2)
+  openingStock   Int         @default(0)
+  currentStock   Int         @default(0)
+  lowStockLevel  Int         @default(5)
   notes          String?
   costBreakdown  Json?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   user           UserProfile     @relation(fields: [userId], references: [id], onDelete: Cascade)
   saleItems      SaleItem[]
@@ -209,6 +226,7 @@ model Product {
   @@index([userId])
   @@index([userId, isActive])
   @@index([userId, name])
+  @@index([userId, productType])
 }
 
 model ProductCostCalculation {
@@ -380,6 +398,12 @@ model StockMovement {
   quantity       Int
   quantityBefore Int?
   quantityAfter  Int?
+  /** Unit cost for this receipt/issue (absolute per unit). */
+  unitCost       Decimal?          @db.Decimal(14, 2)
+  /** quantity × unitCost for this movement (signed with quantity where useful). */
+  totalCost      Decimal?          @db.Decimal(14, 2)
+  /** Product weighted-average cost after this movement. */
+  averageCostAfter Decimal?        @db.Decimal(14, 2)
   reason         String?
   reference      String?
   date           DateTime          @db.Date

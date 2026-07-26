@@ -23,22 +23,30 @@ export default async function ProductsPage({
       name: true,
       category: true,
       sku: true,
+      productType: true,
+      unitOfMeasure: true,
       currentStock: true,
       lowStockLevel: true,
       openingStock: true,
       costPrice: true,
+      defaultPurchaseCost: true,
+      standardProductionCost: true,
       sellingPrice: true,
       notes: true,
       costBreakdown: true,
       isActive: true,
       updatedAt: true,
+      _count: { select: { stockMovements: true } },
     },
     orderBy: { name: 'asc' },
   })
 
   const filtered =
     stock === 'low'
-      ? products.filter((p) => p.currentStock <= p.lowStockLevel)
+      ? products.filter(
+          (p) =>
+            p.productType !== 'SERVICE' && p.currentStock <= p.lowStockLevel,
+        )
       : products
 
   const rows = filtered.map((p) => ({
@@ -46,15 +54,20 @@ export default async function ProductsPage({
     name: p.name,
     category: p.category,
     sku: p.sku,
+    productType: p.productType,
+    unitOfMeasure: p.unitOfMeasure,
     currentStock: p.currentStock,
     lowStockLevel: p.lowStockLevel,
     openingStock: p.openingStock,
     costPrice: p.costPrice.toString(),
+    defaultPurchaseCost: p.defaultPurchaseCost.toString(),
+    standardProductionCost: p.standardProductionCost.toString(),
     sellingPrice: p.sellingPrice.toString(),
     notes: p.notes,
     costBreakdown: parseCostBreakdown(p.costBreakdown),
     isActive: p.isActive,
     updatedAt: p.updatedAt.toISOString(),
+    inventoryCostReadOnly: p._count.stockMovements > 0 || p.currentStock > 0,
   }))
 
   return (

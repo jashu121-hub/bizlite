@@ -4,13 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { requireProfile } from '@/lib/auth'
 import { fail, ok } from '@/lib/action-result'
 import { prisma } from '@/lib/prisma'
-import { money, prismaDecimal } from '@/lib/money'
+import { money, moneyNumber, prismaDecimal } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
 import {
   normalizeCostBreakdown,
-  weightedAverageCost,
   type ProductCostBreakdown,
 } from '@/lib/product-cost'
+import { applyStockIssue, applyStockReceipt, tracksInventory } from '@/lib/services/inventory'
 import {
   addStockSchema,
   adjustStockDetailedSchema,
@@ -34,7 +34,13 @@ function revalidateProductPaths(productId?: string) {
   revalidatePath('/reports')
   revalidatePath('/sales')
   revalidatePath('/sales/new')
+  revalidatePath('/cost-pricing')
   if (productId) revalidatePath(`/products/${productId}`)
+}
+
+function moneyOrZero(value: string | number | undefined | null): string {
+  if (value === '' || value === null || value === undefined) return '0'
+  return String(value)
 }
 
 export async function createProductAction(raw: unknown) {
@@ -43,7 +49,18 @@ export async function createProductAction(raw: unknown) {
     const parsed = productSchema.safeParse(raw)
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid product')
     const data = parsed.data
-    const opening = data.openingStock
+    const isService = data.productType === 'SERVICE'
+    const opening = isService ? 0 : Number(data.openingStock || 0)
+    const openingUnitCost = moneyNumber(data.openingStockUnitCost || 0)
+    const defaultPurchase = moneyOrZero(data.defaultPurchaseCost ?? data.costPrice)
+    const directServiceCost = moneyOrZero(data.costPrice)
+    const standardProduction = moneyOrZero(data.standardProductionCost)
+    const selling = moneyOrZero(data.sellingPrice)
+
+    if (opening > 0 && !(openingUnitCost > 0)) {
+      return fail('Opening stock greater than zero requires a unit cost greater than zero')
+    }
+
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
         data: {
@@ -51,38 +68,46 @@ export async function createProductAction(raw: unknown) {
           name: data.name.trim(),
           category: data.category,
           sku: data.sku || null,
-          costPrice: prismaDecimal(data.costPrice),
-          sellingPrice: prismaDecimal(data.sellingPrice),
+          productType: data.productType,
+          unitOfMeasure: data.unitOfMeasure || 'pcs',
+          // WAC starts at 0 for goods; opening receipt sets it. Services use direct cost.
+          costPrice: prismaDecimal(isService ? directServiceCost : 0),
+          defaultPurchaseCost: prismaDecimal(isService ? 0 : defaultPurchase),
+          standardProductionCost: prismaDecimal(
+            data.productType === 'MANUFACTURED' ? standardProduction : 0,
+          ),
+          sellingPrice: prismaDecimal(selling),
           openingStock: opening,
-          currentStock: opening,
-          lowStockLevel: data.lowStockLevel,
+          currentStock: 0,
+          lowStockLevel: isService ? 0 : data.lowStockLevel,
           notes: data.notes || null,
           isActive: data.isActive,
           costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
         },
       })
+
       if (opening > 0) {
-        await tx.stockMovement.create({
-          data: {
-            userId: user.id,
-            productId: created.id,
-            type: 'OPENING',
-            quantity: opening,
-            quantityBefore: 0,
-            quantityAfter: opening,
-            reason: 'Opening Balance Correction',
-            date: toDateOnly(new Date()),
-            notes: 'Opening stock',
-          },
+        await applyStockReceipt(tx, {
+          userId: user.id,
+          productId: created.id,
+          quantity: opening,
+          unitCost: openingUnitCost,
+          type: 'OPENING',
+          date: new Date(),
+          reason: 'Opening Balance Correction',
+          reference: `OPENING:${created.id}`,
+          notes: 'Opening stock',
         })
       }
+
       return created
     })
+
     revalidateProductPaths(product.id)
     return ok({ id: product.id }, 'Product created')
   } catch (error) {
     console.error('createProductAction', error)
-    return fail('Unable to create product')
+    return fail(error instanceof Error ? error.message : 'Unable to create product')
   }
 }
 
@@ -95,6 +120,21 @@ export async function updateProductAction(id: string, raw: unknown) {
     if (!existing) return fail('Product not found')
     const data = parsed.data
     const nextName = data.name.trim()
+    const isService = data.productType === 'SERVICE'
+    const movementCount = await prisma.stockMovement.count({
+      where: { productId: id, userId: user.id },
+    })
+
+    // Switching to SERVICE while stock remains is not allowed.
+    if (isService && existing.currentStock !== 0) {
+      return fail('Clear stock before changing this product to a Service')
+    }
+
+    const defaultPurchase = moneyOrZero(data.defaultPurchaseCost ?? data.costPrice)
+    const selling = moneyOrZero(data.sellingPrice)
+    const standardProduction = moneyOrZero(data.standardProductionCost)
+    const directServiceCost = moneyOrZero(data.costPrice)
+
     await prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id },
@@ -102,18 +142,27 @@ export async function updateProductAction(id: string, raw: unknown) {
           name: nextName,
           category: data.category,
           sku: data.sku || null,
-          costPrice: prismaDecimal(data.costPrice),
-          sellingPrice: prismaDecimal(data.sellingPrice),
-          // Keep stock immutable via product edit
+          productType: data.productType,
+          unitOfMeasure: data.unitOfMeasure || 'pcs',
+          // Inventory WAC is ledger-driven once movements exist.
+          ...(isService
+            ? { costPrice: prismaDecimal(directServiceCost), currentStock: 0, lowStockLevel: 0 }
+            : movementCount === 0 && existing.currentStock === 0
+              ? {} // keep existing WAC (usually 0) — do not let form overwrite
+              : {}),
+          defaultPurchaseCost: prismaDecimal(isService ? 0 : defaultPurchase),
+          standardProductionCost: prismaDecimal(
+            data.productType === 'MANUFACTURED' ? standardProduction : 0,
+          ),
+          sellingPrice: prismaDecimal(selling),
           openingStock: existing.openingStock,
-          currentStock: existing.currentStock,
-          lowStockLevel: data.lowStockLevel,
+          currentStock: isService ? 0 : existing.currentStock,
+          lowStockLevel: isService ? 0 : data.lowStockLevel,
           notes: data.notes || null,
           isActive: data.isActive,
           costBreakdown: toCostBreakdownJson(data.costBreakdown ?? null),
         },
       })
-      // Keep denormalized sale line names in sync (reports, invoices, dashboard)
       if (nextName !== existing.name) {
         await tx.saleItem.updateMany({
           where: { productId: id },
@@ -258,9 +307,10 @@ export async function addStockAction(raw: unknown) {
         where: { id: data.productId, userId: user.id },
       })
       if (!product) throw new Error('Product not found')
+      if (!tracksInventory(product.productType)) {
+        throw new Error('Services cannot hold stock')
+      }
 
-      const before = product.currentStock
-      const after = before + data.quantity
       const noteParts = [
         data.supplier ? `Supplier: ${data.supplier}` : null,
         data.notes || null,
@@ -274,41 +324,33 @@ export async function addStockAction(raw: unknown) {
       const hasBatchBreakdown =
         Boolean(batchBreakdown) &&
         (hasBatchProduction || money(batchBreakdown!.totalSellingCost).gt(0))
-      const newUnitCost = hasBatchProduction
+
+      const unitCost = hasBatchProduction
         ? batchBreakdown!.inventoryCostPerUnit
-        : data.purchaseCost
+        : data.purchaseCost !== '' && data.purchaseCost != null
           ? String(data.purchaseCost)
-          : null
+          : moneyNumber(product.defaultPurchaseCost) > 0
+            ? product.defaultPurchaseCost.toString()
+            : product.costPrice.toString()
 
-      const nextCostPrice = newUnitCost
-        ? weightedAverageCost(before, product.costPrice, data.quantity, newUnitCost)
-        : null
-
-      await tx.product.update({
-        where: { id: product.id },
-        data: {
-          currentStock: after,
-          ...(nextCostPrice ? { costPrice: prismaDecimal(nextCostPrice) } : {}),
-          ...(hasBatchBreakdown
-            ? { costBreakdown: toCostBreakdownJson(batchBreakdown) }
-            : {}),
-        },
+      await applyStockReceipt(tx, {
+        userId: user.id,
+        productId: product.id,
+        quantity: data.quantity,
+        unitCost,
+        type: 'ADJUSTMENT_IN',
+        date: data.date,
+        reason: 'New Purchase',
+        reference: data.reference || null,
+        notes: noteParts.join(' · ') || 'Stock added',
       })
 
-      await tx.stockMovement.create({
-        data: {
-          userId: user.id,
-          productId: product.id,
-          type: 'ADJUSTMENT_IN',
-          quantity: data.quantity,
-          quantityBefore: before,
-          quantityAfter: after,
-          reason: 'New Purchase',
-          reference: data.reference || null,
-          date: toDateOnly(data.date),
-          notes: noteParts.join(' · ') || 'Stock added',
-        },
-      })
+      if (hasBatchBreakdown) {
+        await tx.product.update({
+          where: { id: product.id },
+          data: { costBreakdown: toCostBreakdownJson(batchBreakdown) },
+        })
+      }
     })
 
     revalidateProductPaths(data.productId)
@@ -321,16 +363,20 @@ export async function addStockAction(raw: unknown) {
 
 export async function adjustStockDetailedAction(raw: unknown) {
   try {
-    const { user } = await requireProfile()
+    const { user, profile } = await requireProfile()
     const parsed = adjustStockDetailedSchema.safeParse(raw)
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid adjustment')
     const data = parsed.data
+    const allowNegative = Boolean(profile.allowNegativeStock)
 
     await prisma.$transaction(async (tx) => {
       const product = await tx.product.findFirst({
         where: { id: data.productId, userId: user.id },
       })
       if (!product) throw new Error('Product not found')
+      if (!tracksInventory(product.productType)) {
+        throw new Error('Services cannot hold stock')
+      }
 
       const before = product.currentStock
       let after = before
@@ -347,27 +393,38 @@ export async function adjustStockDetailedAction(raw: unknown) {
         delta = after - before
       }
 
-      if (after < 0) throw new Error('Stock cannot become negative')
+      if (after < 0 && !allowNegative) throw new Error('Stock cannot become negative')
       if (delta === 0) throw new Error('No stock change to apply')
 
-      await tx.product.update({
-        where: { id: product.id },
-        data: { currentStock: after },
-      })
+      const unitCost =
+        moneyNumber(product.costPrice) > 0
+          ? product.costPrice
+          : product.defaultPurchaseCost
 
-      await tx.stockMovement.create({
-        data: {
+      if (delta > 0) {
+        await applyStockReceipt(tx, {
           userId: user.id,
           productId: product.id,
-          type: delta > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
           quantity: delta,
-          quantityBefore: before,
-          quantityAfter: after,
+          unitCost,
+          type: 'ADJUSTMENT_IN',
+          date: data.date,
           reason: data.reason,
-          date: toDateOnly(data.date),
           notes: data.notes || 'Stock adjustment',
-        },
-      })
+        })
+      } else {
+        await applyStockIssue(tx, {
+          userId: user.id,
+          productId: product.id,
+          quantity: Math.abs(delta),
+          unitCost,
+          type: 'ADJUSTMENT_OUT',
+          date: data.date,
+          reason: data.reason,
+          notes: data.notes || 'Stock adjustment',
+          allowNegative,
+        })
+      }
     })
 
     revalidateProductPaths(data.productId)
@@ -381,36 +438,50 @@ export async function adjustStockDetailedAction(raw: unknown) {
 /** Legacy adjust used by product detail page */
 export async function adjustStockAction(raw: unknown) {
   try {
-    const { user } = await requireProfile()
+    const { user, profile } = await requireProfile()
     const parsed = stockAdjustmentSchema.safeParse(raw)
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Invalid adjustment')
     const data = parsed.data
+    const allowNegative = Boolean(profile.allowNegativeStock)
+
     await prisma.$transaction(async (tx) => {
       const product = await tx.product.findFirst({
         where: { id: data.productId, userId: user.id },
       })
       if (!product) throw new Error('Product not found')
-      const before = product.currentStock
-      const next =
-        data.type === 'ADD' ? before + data.quantity : before - data.quantity
-      if (next < 0) throw new Error('Stock cannot become negative')
-      await tx.product.update({
-        where: { id: product.id },
-        data: { currentStock: next },
-      })
-      await tx.stockMovement.create({
-        data: {
+      if (!tracksInventory(product.productType)) {
+        throw new Error('Services cannot hold stock')
+      }
+
+      const unitCost =
+        moneyNumber(product.costPrice) > 0
+          ? product.costPrice
+          : product.defaultPurchaseCost
+
+      if (data.type === 'ADD') {
+        await applyStockReceipt(tx, {
           userId: user.id,
           productId: product.id,
-          type: data.type === 'ADD' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-          quantity: data.type === 'ADD' ? data.quantity : -data.quantity,
-          quantityBefore: before,
-          quantityAfter: next,
+          quantity: data.quantity,
+          unitCost,
+          type: 'ADJUSTMENT_IN',
+          date: data.date,
           reason: 'Manual Correction',
-          date: toDateOnly(data.date),
           notes: data.notes || 'Stock adjustment',
-        },
-      })
+        })
+      } else {
+        await applyStockIssue(tx, {
+          userId: user.id,
+          productId: product.id,
+          quantity: data.quantity,
+          unitCost,
+          type: 'ADJUSTMENT_OUT',
+          date: data.date,
+          reason: 'Manual Correction',
+          notes: data.notes || 'Stock adjustment',
+          allowNegative,
+        })
+      }
     })
     revalidateProductPaths(data.productId)
     return ok(undefined, 'Stock updated')
@@ -444,6 +515,9 @@ export async function getStockHistoryAction(productId: string) {
         quantity: m.quantity,
         quantityBefore: m.quantityBefore,
         quantityAfter: m.quantityAfter,
+        unitCost: m.unitCost?.toString() ?? null,
+        totalCost: m.totalCost?.toString() ?? null,
+        averageCostAfter: m.averageCostAfter?.toString() ?? null,
         reason: m.reason,
         reference: m.reference,
         date: m.date.toISOString(),

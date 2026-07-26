@@ -43,6 +43,7 @@ export function ProductActions({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [active, setActive] = useState<ActionKey>(null)
+  const isService = product.productType === 'SERVICE'
 
   return (
     <>
@@ -54,22 +55,28 @@ export function ProductActions({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={() => setActive('add')}>
-              <PackagePlus className="h-4 w-4" />
-              Add Stock
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setActive('adjust')}>
-              <SlidersHorizontal className="h-4 w-4" />
-              Adjust Stock
-            </DropdownMenuItem>
+            {isService ? null : (
+              <>
+                <DropdownMenuItem onClick={() => setActive('add')}>
+                  <PackagePlus className="h-4 w-4" />
+                  Add Stock
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActive('adjust')}>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Adjust Stock
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuItem onClick={() => setActive('edit')}>
               <Pencil className="h-4 w-4" />
               Edit
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setActive('history')}>
-              <History className="h-4 w-4" />
-              Stock History
-            </DropdownMenuItem>
+            {isService ? null : (
+              <DropdownMenuItem onClick={() => setActive('history')}>
+                <History className="h-4 w-4" />
+                Stock History
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             {!product.isActive ? (
               <DropdownMenuItem
@@ -100,10 +107,12 @@ export function ProductActions({
         </DropdownMenu>
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={() => setActive('add')}>
-            <PackagePlus className="h-3.5 w-3.5" />
-            Add Stock
-          </Button>
+          {isService ? null : (
+            <Button type="button" size="sm" variant="outline" onClick={() => setActive('add')}>
+              <PackagePlus className="h-3.5 w-3.5" />
+              Add Stock
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" size="sm" variant="ghost" aria-label="More product actions">
@@ -111,18 +120,22 @@ export function ProductActions({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => setActive('adjust')}>
-                <SlidersHorizontal className="h-4 w-4" />
-                Adjust Stock
-              </DropdownMenuItem>
+              {isService ? null : (
+                <DropdownMenuItem onClick={() => setActive('adjust')}>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Adjust Stock
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setActive('edit')}>
                 <Pencil className="h-4 w-4" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setActive('history')}>
-                <History className="h-4 w-4" />
-                Stock History
-              </DropdownMenuItem>
+              {isService ? null : (
+                <DropdownMenuItem onClick={() => setActive('history')}>
+                  <History className="h-4 w-4" />
+                  Stock History
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               {!product.isActive ? (
                 <DropdownMenuItem
@@ -154,17 +167,26 @@ export function ProductActions({
         </div>
       )}
 
-      <AddStockModal
-        product={product}
-        currency={currency}
-        open={active === 'add'}
-        onOpenChange={(open) => setActive(open ? 'add' : null)}
-      />
-      <AdjustStockModal
-        product={product}
-        open={active === 'adjust'}
-        onOpenChange={(open) => setActive(open ? 'adjust' : null)}
-      />
+      {isService ? null : (
+        <>
+          <AddStockModal
+            product={product}
+            currency={currency}
+            open={active === 'add'}
+            onOpenChange={(open) => setActive(open ? 'add' : null)}
+          />
+          <AdjustStockModal
+            product={product}
+            open={active === 'adjust'}
+            onOpenChange={(open) => setActive(open ? 'adjust' : null)}
+          />
+          <StockHistoryModal
+            product={product}
+            open={active === 'history'}
+            onOpenChange={(open) => setActive(open ? 'history' : null)}
+          />
+        </>
+      )}
       <EditProductModal
         product={product}
         currency={currency}
@@ -175,11 +197,6 @@ export function ProductActions({
         product={product}
         open={active === 'delete'}
         onOpenChange={(open) => setActive(open ? 'delete' : null)}
-      />
-      <StockHistoryModal
-        product={product}
-        open={active === 'history'}
-        onOpenChange={(open) => setActive(open ? 'history' : null)}
       />
     </>
   )

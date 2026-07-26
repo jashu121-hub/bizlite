@@ -2,8 +2,15 @@ import { prisma } from '@/lib/prisma'
 import { requireProfile } from '@/lib/auth'
 import { CostPricingWorkspace } from '@/components/cost-pricing/cost-pricing-workspace'
 
-export default async function CostPricingPage() {
+export default async function CostPricingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { user, profile } = await requireProfile()
+  const params = await searchParams
+  const initialProductId =
+    typeof params.productId === 'string' ? params.productId : undefined
 
   const [products, calculations, expenseCategories, cashAccounts] = await Promise.all([
     prisma.product.findMany({
@@ -40,6 +47,7 @@ export default async function CostPricingPage() {
   return (
     <CostPricingWorkspace
       currency={profile.currency}
+      initialProductId={initialProductId}
       products={products.map((p) => ({
         id: p.id,
         name: p.name,

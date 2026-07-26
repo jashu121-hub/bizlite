@@ -12,7 +12,11 @@ import { createDefaultPayload } from '@/lib/cost-pricing/defaults'
 import { payloadToProductCostBreakdown } from '@/lib/cost-pricing/map-to-product'
 import type { CostPricingPayload } from '@/lib/cost-pricing/types'
 import { normalizeCostBreakdown } from '@/lib/product-cost'
-import { weightedAverageCost } from '@/lib/product-cost'
+import {
+  applyStockReceipt,
+  productionReceiptReference,
+  tracksInventory,
+} from '@/lib/services/inventory'
 import { z } from 'zod'
 
 function revalidateCostPaths(productId?: string | null) {
@@ -270,8 +274,11 @@ export async function applyCostPricingToProductAction(raw: {
         data: {
           ...(raw.applyCost
             ? {
-                costPrice: prismaDecimal(totals.costPerUnit),
+                // Standard production cost for future batches only — does not revalue stock / WAC.
+                standardProductionCost: prismaDecimal(totals.costPerUnit),
                 costBreakdown: breakdown as unknown as Prisma.InputJsonValue,
+                productType:
+                  product.productType === 'SERVICE' ? product.productType : 'MANUFACTURED',
               }
             : {}),
           ...(raw.applyPrice
@@ -310,7 +317,11 @@ export async function applyCostPricingToProductAction(raw: {
         costPerUnit: totals.costPerUnit,
         sellingPrice: totals.suggestedSellingPrice,
       },
-      'Applied to product for future transactions only',
+      raw.applyCost && !raw.applyPrice
+        ? 'Set as standard production cost for future batches'
+        : raw.applyPrice && !raw.applyCost
+          ? 'Default selling price updated for future sales'
+          : 'Applied to product for future transactions only',
     )
   } catch (error) {
     console.error('applyCostPricingToProductAction', error)
@@ -343,12 +354,37 @@ export async function addProducedStockFromCalculationAction(raw: {
       where: { id: raw.productId, userId: user.id },
     })
     if (!product) return fail('Product not found')
+    if (!tracksInventory(product.productType)) {
+      return fail('Services cannot receive production stock')
+    }
+
+    const calcRef = raw.calculationId
+      ? productionReceiptReference(raw.calculationId)
+      : null
+    if (calcRef) {
+      const duplicate = await prisma.stockMovement.findFirst({
+        where: {
+          userId: user.id,
+          productId: product.id,
+          type: 'PRODUCTION_RECEIPT',
+          reference: calcRef,
+        },
+        select: { id: true },
+      })
+      if (duplicate) {
+        return fail(
+          'Production stock was already added from this calculation. Duplicate entries are blocked.',
+        )
+      }
+    }
 
     let breakdownJson: Prisma.InputJsonValue | undefined
+    let batchTotal = unitCost * qty
     if (raw.payload) {
       try {
         const payload = asPayload(raw.payload)
         const totals = computeCostPricing(payload)
+        batchTotal = totals.totalBatchCost
         breakdownJson = payloadToProductCostBreakdown(
           payload,
           totals,
@@ -359,20 +395,31 @@ export async function addProducedStockFromCalculationAction(raw: {
     }
 
     await prisma.$transaction(async (tx) => {
-      const before = product.currentStock
-      const after = before + qty
-      const nextCost = weightedAverageCost(before, product.costPrice, qty, unitCost)
       const noteParts = [
         raw.storageLocation ? `Location: ${raw.storageLocation}` : null,
         raw.notes || null,
+        `Batch cost: ${moneyNumber(batchTotal).toFixed(2)}`,
         raw.calculationId ? `Cost calc: ${raw.calculationId}` : null,
       ].filter(Boolean)
+
+      const receipt = await applyStockReceipt(tx, {
+        userId: user.id,
+        productId: product.id,
+        quantity: qty,
+        unitCost,
+        type: 'PRODUCTION_RECEIPT',
+        date: raw.productionDate,
+        reason: 'Production',
+        reference: raw.batchReference || calcRef || null,
+        notes: noteParts.join(' · ') || 'Production batch receipt',
+      })
 
       await tx.product.update({
         where: { id: product.id },
         data: {
-          currentStock: after,
-          costPrice: prismaDecimal(nextCost),
+          standardProductionCost: prismaDecimal(unitCost),
+          productType:
+            product.productType === 'SERVICE' ? product.productType : 'MANUFACTURED',
           ...(breakdownJson
             ? {
                 costBreakdown: normalizeCostBreakdown(
@@ -383,26 +430,23 @@ export async function addProducedStockFromCalculationAction(raw: {
         },
       })
 
-      await tx.stockMovement.create({
-        data: {
-          userId: user.id,
-          productId: product.id,
-          type: 'ADJUSTMENT_IN',
-          quantity: qty,
-          quantityBefore: before,
-          quantityAfter: after,
-          reason: 'Production',
-          reference: raw.batchReference || raw.calculationId || null,
-          date: toDateOnly(raw.productionDate),
-          notes: noteParts.join(' · ') || 'Produced stock from cost calculator',
-        },
-      })
+      if (raw.calculationId) {
+        await tx.productCostCalculation.updateMany({
+          where: { id: raw.calculationId, userId: user.id },
+          data: {
+            status: 'APPLIED',
+            productId: product.id,
+          },
+        })
+      }
+
+      return receipt
     })
 
     revalidateCostPaths(product.id)
     return ok(
       { inventoryValue: moneyNumber(prismaDecimal(unitCost).times(qty)) },
-      'Produced stock added',
+      'Production batch created and stock added',
     )
   } catch (error) {
     console.error('addProducedStockFromCalculationAction', error)

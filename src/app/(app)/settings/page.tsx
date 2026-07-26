@@ -23,6 +23,7 @@ export default async function SettingsPage() {
           phone: profile.phone ?? '',
           currency: profile.currency ?? DEFAULT_CURRENCY,
           costingMode: profile.costingMode === 'SIMPLE' ? 'SIMPLE' : 'INVENTORY',
+          allowNegativeStock: Boolean(profile.allowNegativeStock),
         }}
       />
       <ExpenseCategoryManager

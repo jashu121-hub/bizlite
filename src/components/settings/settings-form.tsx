@@ -38,6 +38,7 @@ const settingsFormSchema = z.object({
   phone: z.string().max(40).optional().or(z.literal('')),
   currency: z.string().min(3).max(3),
   costingMode: z.enum(['INVENTORY', 'SIMPLE']),
+  allowNegativeStock: z.boolean(),
 })
 
 type SettingsFormValues = z.infer<typeof settingsFormSchema>
@@ -176,6 +177,32 @@ export function SettingsForm({ defaultValues }: SettingsFormProps) {
                       Do not mix modes. Inventory mode keeps sale-time unit costs. Simple mode uses
                       period Production Cost expenses as Profit and Loss COGS.
                     </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="allowNegativeStock"
+                render={({ field }) => (
+                  <FormItem>
+                    <div className="flex items-start justify-between gap-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+                      <div className="space-y-1">
+                        <FormLabel>Allow negative stock</FormLabel>
+                        <p className="text-xs text-muted-foreground">
+                          When off, stock-tracked products cannot be sold below available quantity.
+                        </p>
+                      </div>
+                      <FormControl>
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4"
+                          checked={field.value}
+                          onChange={(e) => field.onChange(e.target.checked)}
+                        />
+                      </FormControl>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}

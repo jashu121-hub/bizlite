@@ -34,19 +34,71 @@ export const productCostBreakdownSchema = z.object({
   fullCostPerUnit: moneySchema.optional(),
 })
 
-export const productSchema = z.object({
-  name: z.string().min(1, 'Product name is required').max(160),
-  category: z.string().min(1, 'Category is required'),
-  sku: z.string().max(60).optional().or(z.literal('')),
-  costPrice: moneySchema,
-  sellingPrice: requiredPositiveMoneySchema,
-  openingStock: optionalIntSchema(0, 0),
-  currentStock: optionalIntSchema(0, 0).optional(),
-  lowStockLevel: optionalIntSchema(0, 0),
-  notes: z.string().max(1000).optional().or(z.literal('')),
-  isActive: z.boolean().default(true),
-  costBreakdown: productCostBreakdownSchema.nullable().optional(),
-})
+export const productTypeSchema = z.enum(['RESALE', 'MANUFACTURED', 'SERVICE'])
+
+export const PRODUCT_TYPE_OPTIONS = [
+  { value: 'RESALE' as const, label: 'Resale Product' },
+  { value: 'MANUFACTURED' as const, label: 'Manufactured Product' },
+  { value: 'SERVICE' as const, label: 'Service' },
+]
+
+export const productSchema = z
+  .object({
+    name: z.string().min(1, 'Product name is required').max(160),
+    category: z.string().min(1, 'Category is required'),
+    sku: z.string().max(60).optional().or(z.literal('')),
+    productType: productTypeSchema.default('RESALE'),
+    unitOfMeasure: z.string().min(1).max(40).default('pcs'),
+    /** Current inventory / WAC cost — may be 0 for new manufactured products. */
+    costPrice: moneySchema,
+    defaultPurchaseCost: moneySchema.optional().or(z.literal('')),
+    standardProductionCost: moneySchema.optional().or(z.literal('')),
+    /** Default suggested selling price — may be 0 until priced. */
+    sellingPrice: moneySchema,
+    openingStock: optionalIntSchema(0, 0),
+    openingStockUnitCost: moneySchema.optional().or(z.literal('')),
+    currentStock: optionalIntSchema(0, 0).optional(),
+    lowStockLevel: optionalIntSchema(0, 0),
+    notes: z.string().max(1000).optional().or(z.literal('')),
+    isActive: z.boolean().default(true),
+    costBreakdown: productCostBreakdownSchema.nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const opening = Number(data.openingStock || 0)
+    const openingUnit = Number(data.openingStockUnitCost || 0)
+    const sell = Number(data.sellingPrice === '' ? 0 : data.sellingPrice)
+
+    if (sell < 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Selling price cannot be negative',
+        path: ['sellingPrice'],
+      })
+    }
+
+    if (data.productType === 'SERVICE') {
+      if (opening > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Services cannot have opening stock',
+          path: ['openingStock'],
+        })
+      }
+      return
+    }
+
+    if (opening > 0 && !(openingUnit > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Opening stock greater than zero requires a unit cost greater than zero',
+        path: ['openingStockUnitCost'],
+      })
+    }
+
+    if (data.productType === 'RESALE' && data.sellingPrice !== '' && sell <= 0) {
+      // Allow 0 for draft; warn only if they entered invalid negative (handled above)
+    }
+  })
 
 const positiveQuantitySchema = z.preprocess(
   (v) => (v === '' || v === null || v === undefined ? undefined : v),
@@ -69,6 +121,7 @@ export const STOCK_REASONS = [
   'Lost Item',
   'Manual Correction',
   'Opening Balance Correction',
+  'Production',
   'Other',
 ] as const
 
@@ -110,3 +163,6 @@ export type ProductCostBreakdownInput = z.infer<typeof productCostBreakdownSchem
 export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>
 export type AddStockInput = z.infer<typeof addStockSchema>
 export type AdjustStockDetailedInput = z.infer<typeof adjustStockDetailedSchema>
+
+/** @deprecated Prefer moneySchema for selling price — kept for external imports */
+export { requiredPositiveMoneySchema }

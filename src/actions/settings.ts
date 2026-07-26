@@ -13,6 +13,7 @@ const settingsSchema = z.object({
   phone: z.string().max(40).optional().or(z.literal('')),
   currency: z.string().min(3).max(3),
   costingMode: z.enum(['INVENTORY', 'SIMPLE']).optional(),
+  allowNegativeStock: z.boolean().optional(),
 })
 
 export async function completeSetupAction(raw: unknown) {
@@ -55,11 +56,16 @@ export async function updateSettingsAction(raw: unknown) {
         phone: parsed.data.phone || null,
         currency: parsed.data.currency,
         ...(parsed.data.costingMode ? { costingMode: parsed.data.costingMode } : {}),
+        ...(parsed.data.allowNegativeStock !== undefined
+          ? { allowNegativeStock: parsed.data.allowNegativeStock }
+          : {}),
       },
     })
     revalidatePath('/settings')
     revalidatePath('/dashboard')
     revalidatePath('/reports')
+    revalidatePath('/sales')
+    revalidatePath('/products')
     return ok(undefined, 'Settings saved')
   } catch (error) {
     console.error('updateSettingsAction', error)

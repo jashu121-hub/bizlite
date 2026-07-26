@@ -31,10 +31,15 @@ export function EditProductModal({
         currency={currency}
         hideOpeningStock
         initial={{
+          id: product.id,
           name: product.name,
           category: product.category,
           sku: product.sku ?? '',
+          productType: product.productType,
+          unitOfMeasure: product.unitOfMeasure,
           costPrice: product.costPrice,
+          defaultPurchaseCost: product.defaultPurchaseCost,
+          standardProductionCost: product.standardProductionCost,
           sellingPrice: product.sellingPrice,
           openingStock: product.openingStock,
           currentStock: product.currentStock,
@@ -42,6 +47,7 @@ export function EditProductModal({
           notes: product.notes ?? '',
           isActive: product.isActive,
           costBreakdown: product.costBreakdown,
+          inventoryCostReadOnly: product.inventoryCostReadOnly,
         }}
         onSubmit={(data) => updateProductAction(product.id, data)}
         onSuccess={() => onOpenChange(false)}

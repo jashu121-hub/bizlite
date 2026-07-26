@@ -12,7 +12,7 @@ import { fail, ok } from '@/lib/action-result'
 import { prisma } from '@/lib/prisma'
 import { moneyNumber, prismaDecimal } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
-import { weightedAverageCost } from '@/lib/product-cost'
+import { applyStockReceipt, tracksInventory } from '@/lib/services/inventory'
 import { expenseSchema } from '@/lib/validations/expense'
 
 function revalidateExpensePaths() {
@@ -113,6 +113,9 @@ async function applyInventoryFromProductionExpense(
     where: { id: input.productId, userId: input.userId },
   })
   if (!product) throw new Error('Related product was not found')
+  if (!tracksInventory(product.productType)) {
+    throw new Error('Services cannot receive inventory from expenses')
+  }
 
   const qty = Math.max(0, Math.floor(input.quantity))
   if (qty <= 0) return
@@ -122,31 +125,16 @@ async function applyInventoryFromProductionExpense(
       ? input.unitCost
       : moneyNumber(prismaDecimal(input.expenseAmount).div(qty))
 
-  const before = product.currentStock
-  const after = before + qty
-  const nextCost = weightedAverageCost(before, product.costPrice, qty, unitCost)
-
-  await tx.product.update({
-    where: { id: product.id },
-    data: {
-      currentStock: after,
-      costPrice: prismaDecimal(nextCost),
-    },
-  })
-
-  await tx.stockMovement.create({
-    data: {
-      userId: input.userId,
-      productId: product.id,
-      type: 'ADJUSTMENT_IN',
-      quantity: qty,
-      quantityBefore: before,
-      quantityAfter: after,
-      reason: 'Production expense',
-      reference: input.batch || input.expenseId,
-      date: input.date,
-      notes: `From expense: ${input.description}`,
-    },
+  await applyStockReceipt(tx, {
+    userId: input.userId,
+    productId: product.id,
+    quantity: qty,
+    unitCost,
+    type: 'ADJUSTMENT_IN',
+    date: input.date,
+    reason: 'Production expense',
+    reference: input.batch || input.expenseId,
+    notes: `From expense: ${input.description}`,
   })
 }
 

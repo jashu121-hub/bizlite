@@ -176,19 +176,33 @@ export function CostPricingWorkspace({
   initialHistory,
   expenseCategories,
   cashAccounts,
+  initialProductId,
 }: {
   currency: string
   products: ProductRow[]
   initialHistory: HistoryRow[]
   expenseCategories: ExpenseCategory[]
   cashAccounts: CashAccount[]
+  initialProductId?: string
 }) {
   const money = React.useCallback(
     (value: number | string) => formatCurrency(value, currency),
     [currency],
   )
 
-  const [payload, setPayload] = React.useState<CostPricingPayload>(() => createDefaultPayload())
+  const [payload, setPayload] = React.useState<CostPricingPayload>(() => {
+    const base = createDefaultPayload()
+    if (!initialProductId) return base
+    const product = products.find((p) => p.id === initialProductId)
+    if (!product) return base
+    return createDefaultPayload({
+      ...base,
+      productId: product.id,
+      name: product.name,
+      category: product.category || base.category,
+      manualSellingPrice: product.sellingPrice || base.manualSellingPrice,
+    })
+  })
   const [calculationId, setCalculationId] = React.useState<string | undefined>()
   const [history, setHistory] = React.useState(initialHistory)
   const [showHistory, setShowHistory] = React.useState(false)
@@ -1026,8 +1040,14 @@ export function CostPricingWorkspace({
               <Button type="button" disabled={saving} onClick={() => void handleSave('SAVED')}>
                 Save Calculation
               </Button>
-              <Button type="button" variant="secondary" onClick={() => openApply('both')}>
-                Apply Cost & Price to Product
+              <Button type="button" variant="secondary" onClick={() => openApply('cost')}>
+                Set as Standard Production Cost
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => openApply('price')}>
+                Apply Suggested Selling Price
+              </Button>
+              <Button type="button" variant="outline" onClick={openStock}>
+                Create Production Batch and Add Stock
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1040,15 +1060,11 @@ export function CostPricingWorkspace({
                   <DropdownMenuItem disabled={saving} onClick={() => void handleSave('DRAFT')}>
                     Save as Draft
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openApply('cost')}>
-                    Apply Cost Only
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openApply('price')}>
-                    Apply Selling Price Only
+                  <DropdownMenuItem onClick={() => openApply('both')}>
+                    Set Standard Cost & Selling Price
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={openExpense}>Create Production Expense</DropdownMenuItem>
-                  <DropdownMenuItem onClick={openStock}>Add Produced Stock</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => window.print()}>
                     <Printer className="h-4 w-4" />
@@ -1058,8 +1074,9 @@ export function CostPricingWorkspace({
               </DropdownMenu>
             </CardContent>
             <p className="px-6 pb-4 text-xs text-zinc-500">
-              Applying updates the product for future sales only. Historical sales, COGS and past
-              profitability are never changed.
+              Standard production cost and selling price affect future batches/sales only. Creating a
+              production batch adds stock at unit production cost (weighted average). Historical
+              sales and COGS are never changed.
             </p>
           </Card>
 
@@ -1433,12 +1450,12 @@ export function CostPricingWorkspace({
         title="Apply to product?"
         description={
           applyMode === 'cost'
-            ? `Apply unit cost ${money(totals.costPerUnit)} for future sales only?`
+            ? `Set standard production cost ${money(totals.costPerUnit)} for future batches only? Existing stock value is not revalued.`
             : applyMode === 'price'
-              ? `Apply selling price ${money(totals.suggestedSellingPrice)} for future sales only?`
-              : `Apply unit cost ${money(totals.costPerUnit)} and selling price ${money(totals.suggestedSellingPrice)} to this product? Future sales only — historical sales and COGS unchanged.`
+              ? `Set default selling price ${money(totals.suggestedSellingPrice)} for future sales only?`
+              : `Set standard production cost ${money(totals.costPerUnit)} and default selling price ${money(totals.suggestedSellingPrice)}? Future only — historical sales and COGS unchanged.`
         }
-        confirmLabel="Apply"
+        confirmLabel="Confirm"
         onConfirm={confirmApply}
       />
 

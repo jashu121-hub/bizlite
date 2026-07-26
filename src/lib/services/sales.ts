@@ -9,6 +9,7 @@ import {
   subMoney,
 } from '@/lib/money'
 import { toDateOnly } from '@/lib/dates'
+import { applyStockIssue, applyStockReceipt, tracksInventory } from '@/lib/services/inventory'
 import type { SaleInput } from '@/lib/validations/sale'
 
 const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const
@@ -25,6 +26,14 @@ async function nextInvoiceNumber(userId: string, tx: Prisma.TransactionClient) {
   return `${prefix}${String(next).padStart(5, '0')}`
 }
 
+async function getAllowNegativeStock(userId: string, tx: Prisma.TransactionClient) {
+  const profile = await tx.userProfile.findUnique({
+    where: { id: userId },
+    select: { allowNegativeStock: true },
+  })
+  return Boolean(profile?.allowNegativeStock)
+}
+
 async function buildSaleLines(
   userId: string,
   items: SaleInput['items'],
@@ -34,11 +43,13 @@ async function buildSaleLines(
     productMap?: Map<string, Product>
     /** Preserve sale-time unit cost snapshots when editing an existing sale. */
     priorUnitCostByProductId?: Map<string, ReturnType<typeof money>>
+    allowNegative?: boolean
   },
 ) {
   const stockMap = options?.stockMap
   const productMap = options?.productMap
   const priorUnitCostByProductId = options?.priorUnitCostByProductId
+  const allowNegative = Boolean(options?.allowNegative)
   const lines = []
 
   for (const item of items) {
@@ -50,14 +61,18 @@ async function buildSaleLines(
     }
     if (!product) throw new Error('One or more products were not found')
 
+    const inventoryTracked = tracksInventory(product.productType)
     const available = stockMap?.get(product.id) ?? product.currentStock
-    if (item.quantity > available) {
+    if (inventoryTracked && item.quantity > available && !allowNegative) {
       throw new Error(`Insufficient stock for ${product.name}. Available: ${available}`)
     }
+    if (item.quantity < 0) throw new Error('Quantity cannot be negative')
 
     const unitPrice = money(item.unitSellingPrice)
+    if (unitPrice.isNeg()) throw new Error('Selling price cannot be negative')
+
     // Historical protection: keep the original sale-line cost when editing.
-    // New products on the sale snapshot the current catalog cost.
+    // New products on the sale snapshot the current catalog / inventory cost.
     const priorCost = priorUnitCostByProductId?.get(product.id)
     const unitCost = priorCost ?? money(product.costPrice)
     const lineTotal = mulMoney(unitPrice, item.quantity)
@@ -71,8 +86,11 @@ async function buildSaleLines(
       lineTotal,
       lineCost,
       lineProfit,
+      inventoryTracked,
     })
-    if (stockMap) stockMap.set(product.id, available - item.quantity)
+    if (stockMap && inventoryTracked) {
+      stockMap.set(product.id, available - item.quantity)
+    }
   }
 
   return lines
@@ -88,8 +106,63 @@ function totalsFromLines(lines: Awaited<ReturnType<typeof buildSaleLines>>, disc
   return { subtotal, discount, totalAmount, totalCost, grossProfit }
 }
 
+async function postSaleStockIssues(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  saleId: string,
+  invoiceNumber: string,
+  date: Date,
+  lines: Awaited<ReturnType<typeof buildSaleLines>>,
+  allowNegative: boolean,
+) {
+  for (const line of lines) {
+    if (!line.inventoryTracked) continue
+    await applyStockIssue(tx, {
+      userId,
+      productId: line.product.id,
+      quantity: line.quantity,
+      unitCost: line.unitCost,
+      type: 'SALE',
+      date,
+      notes: `Sale ${invoiceNumber}`,
+      saleId,
+      allowNegative,
+    })
+  }
+}
+
+async function reverseSaleStock(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  saleId: string,
+  invoiceNumber: string,
+  date: Date,
+  items: Array<{ productId: string | null; quantity: number; unitCost: Prisma.Decimal | ReturnType<typeof money> }>,
+  notePrefix: string,
+) {
+  for (const item of items) {
+    if (!item.productId) continue
+    const product = await tx.product.findFirst({
+      where: { id: item.productId, userId },
+      select: { productType: true },
+    })
+    if (!product || !tracksInventory(product.productType)) continue
+    await applyStockReceipt(tx, {
+      userId,
+      productId: item.productId,
+      quantity: item.quantity,
+      unitCost: item.unitCost,
+      type: 'SALE_REVERSAL',
+      date,
+      notes: `${notePrefix} ${invoiceNumber}`,
+      saleId,
+    })
+  }
+}
+
 export async function createSaleTransaction(userId: string, input: SaleInput) {
   return prisma.$transaction(async (tx) => {
+    const allowNegative = await getAllowNegativeStock(userId, tx)
     const productIds = [...new Set(input.items.map((item) => item.productId))]
     const products = await tx.product.findMany({
       where: { userId, id: { in: productIds }, isActive: true },
@@ -97,7 +170,11 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
     const productMap = new Map(products.map((product) => [product.id, product]))
     const stockMap = new Map(products.map((product) => [product.id, product.currentStock]))
 
-    const lines = await buildSaleLines(userId, input.items, tx, { stockMap, productMap })
+    const lines = await buildSaleLines(userId, input.items, tx, {
+      stockMap,
+      productMap,
+      allowNegative,
+    })
     const totals = totalsFromLines(lines, input.discount)
     let amountPaid = money(input.amountPaid)
     if (amountPaid.gt(totals.totalAmount)) amountPaid = totals.totalAmount
@@ -171,34 +248,7 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
       })
     }
 
-    const stockByProduct = new Map<string, number>()
-    for (const line of lines) {
-      stockByProduct.set(
-        line.product.id,
-        (stockByProduct.get(line.product.id) ?? 0) + line.quantity,
-      )
-    }
-
-    await Promise.all(
-      [...stockByProduct.entries()].map(([productId, quantity]) =>
-        tx.product.update({
-          where: { id: productId },
-          data: { currentStock: { decrement: quantity } },
-        }),
-      ),
-    )
-
-    await tx.stockMovement.createMany({
-      data: lines.map((line) => ({
-        userId,
-        productId: line.product.id,
-        type: 'SALE' as const,
-        quantity: -line.quantity,
-        date,
-        notes: `Sale ${invoiceNumber}`,
-        saleId: sale.id,
-      })),
-    })
+    await postSaleStockIssues(tx, userId, sale.id, invoiceNumber, date, lines, allowNegative)
 
     if (customerId && amountPaid.gt(0)) {
       await tx.customerPayment.create({
@@ -220,6 +270,7 @@ export async function createSaleTransaction(userId: string, input: SaleInput) {
 
 export async function updateSaleTransaction(userId: string, saleId: string, input: SaleInput) {
   return prisma.$transaction(async (tx) => {
+    const allowNegative = await getAllowNegativeStock(userId, tx)
     const existing = await tx.sale.findFirst({
       where: { id: saleId, userId },
       include: { items: true, payments: true },
@@ -240,22 +291,25 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
     })
     const productMap = new Map(products.map((product) => [product.id, product]))
 
-    const reservedByProduct = new Map<string, number>()
-    for (const item of existing.items) {
-      if (!item.productId) continue
-      reservedByProduct.set(
-        item.productId,
-        (reservedByProduct.get(item.productId) ?? 0) + item.quantity,
-      )
-    }
-
-    // Stock as if this sale were reversed, so validation matches the edit form
-    const stockMap = new Map(
-      products.map((product) => [
-        product.id,
-        product.currentStock + (reservedByProduct.get(product.id) ?? 0),
-      ]),
+    // Reverse original stock first (using original COGS snapshots)
+    await reverseSaleStock(
+      tx,
+      userId,
+      existing.id,
+      existing.invoiceNumber,
+      toDateOnly(input.date),
+      existing.items,
+      'Edit reversal for',
     )
+
+    // Refresh stock map after reversal
+    const refreshed = await tx.product.findMany({
+      where: { userId, id: { in: productIds } },
+    })
+    for (const product of refreshed) {
+      productMap.set(product.id, product)
+    }
+    const stockMap = new Map(refreshed.map((product) => [product.id, product.currentStock]))
 
     const priorUnitCostByProductId = new Map<string, ReturnType<typeof money>>()
     for (const item of existing.items) {
@@ -267,6 +321,7 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       stockMap,
       productMap,
       priorUnitCostByProductId,
+      allowNegative,
     })
     const totals = totalsFromLines(lines, input.discount)
 
@@ -288,56 +343,10 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       if (!customer) throw new Error('Customer not found')
     }
 
-    const affectedProductIds = new Set([
-      ...reservedByProduct.keys(),
-      ...lines.map((line) => line.product.id),
-    ])
-
-    await Promise.all(
-      [...affectedProductIds].map((productId) => {
-        const product = productMap.get(productId)
-        if (!product) return Promise.resolve()
-        const newStock = stockMap.get(productId) ?? product.currentStock
-        return tx.product.update({
-          where: { id: productId },
-          data: { currentStock: newStock },
-        })
-      }),
-    )
-
-    await Promise.all([
-      tx.stockMovement.deleteMany({
-        where: { saleId: existing.id, type: 'SALE', userId },
-      }),
-      tx.saleItem.deleteMany({ where: { saleId: existing.id } }),
-    ])
-
-    const reversalItems = existing.items.filter((item) => item.productId)
-    if (reversalItems.length > 0) {
-      await tx.stockMovement.createMany({
-        data: reversalItems.map((item) => ({
-          userId,
-          productId: item.productId!,
-          type: 'SALE_REVERSAL' as const,
-          quantity: item.quantity,
-          date,
-          notes: `Edit reversal for ${existing.invoiceNumber}`,
-          saleId: existing.id,
-        })),
-      })
-    }
-
-    await tx.stockMovement.createMany({
-      data: lines.map((line) => ({
-        userId,
-        productId: line.product.id,
-        type: 'SALE' as const,
-        quantity: -line.quantity,
-        date,
-        notes: `Sale ${existing.invoiceNumber}`,
-        saleId: existing.id,
-      })),
+    await tx.stockMovement.deleteMany({
+      where: { saleId: existing.id, type: 'SALE', userId },
     })
+    await tx.saleItem.deleteMany({ where: { saleId: existing.id } })
 
     const cashAccountId = input.cashAccountId || null
     if (cashAccountId) {
@@ -347,7 +356,6 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       if (!cashAccount) throw new Error('Selected cash/bank account was not found')
     }
 
-    // Reverse prior sale cash postings before rewriting
     const priorCash = await tx.cashTransaction.findMany({
       where: { userId, saleId: existing.id },
     })
@@ -391,6 +399,8 @@ export async function updateSaleTransaction(userId: string, saleId: string, inpu
       include: { items: true, customer: true },
     })
 
+    await postSaleStockIssues(tx, userId, sale.id, existing.invoiceNumber, date, lines, allowNegative)
+
     if (cashAccountId && amountPaid.gt(0)) {
       await tx.cashAccount.update({
         where: { id: cashAccountId },
@@ -421,38 +431,15 @@ export async function deleteSaleTransaction(userId: string, saleId: string) {
     })
     if (!sale) throw new Error('Sale not found')
 
-    const stockByProduct = new Map<string, number>()
-    for (const item of sale.items) {
-      if (!item.productId) continue
-      stockByProduct.set(
-        item.productId,
-        (stockByProduct.get(item.productId) ?? 0) + item.quantity,
-      )
-    }
-
-    await Promise.all(
-      [...stockByProduct.entries()].map(([productId, quantity]) =>
-        tx.product.update({
-          where: { id: productId },
-          data: { currentStock: { increment: quantity } },
-        }),
-      ),
+    await reverseSaleStock(
+      tx,
+      userId,
+      sale.id,
+      sale.invoiceNumber,
+      sale.date,
+      sale.items,
+      'Deleted sale',
     )
-
-    const reversalItems = sale.items.filter((item) => item.productId)
-    if (reversalItems.length > 0) {
-      await tx.stockMovement.createMany({
-        data: reversalItems.map((item) => ({
-          userId,
-          productId: item.productId!,
-          type: 'SALE_REVERSAL' as const,
-          quantity: item.quantity,
-          date: sale.date,
-          notes: `Deleted sale ${sale.invoiceNumber}`,
-          saleId: sale.id,
-        })),
-      })
-    }
 
     const priorCash = await tx.cashTransaction.findMany({
       where: { userId, saleId: sale.id },

@@ -1,27 +1,39 @@
 'use client'
 
-import { useEffect, useTransition } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useTransition } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { Calculator } from 'lucide-react'
 
 import { FieldHelp } from '@/components/help/field-help'
-import { ProductCostCalculator } from '@/components/products/product-cost-calculator'
 import { CurrencyInput } from '@/components/shared/currency-input'
+import { CurrencyDisplay } from '@/components/shared/currency-display'
 import { NumberInput } from '@/components/shared/number-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { APP_NAME, PRODUCT_CATEGORIES } from '@/lib/constants'
-import { normalizeCostBreakdown, type ProductCostBreakdown } from '@/lib/product-cost'
-import { productSchema, type ProductInput } from '@/lib/validations/product'
+import { PRODUCT_CATEGORIES } from '@/lib/constants'
+import { moneyNumber } from '@/lib/money'
+import {
+  PRODUCT_TYPE_OPTIONS,
+  productSchema,
+  type ProductInput,
+} from '@/lib/validations/product'
 import { cn } from '@/lib/utils'
+
+const UNIT_OPTIONS = ['pcs', 'kg', 'g', 'litre', 'metre', 'hour', 'set', 'box', 'pair']
 
 type ProductFormProps = {
   currency: string
-  initial?: Partial<ProductInput>
+  initial?: Partial<ProductInput> & {
+    id?: string
+    /** When true, current inventory cost is ledger-driven and read-only. */
+    inventoryCostReadOnly?: boolean
+  }
   onSubmit: (data: ProductInput) => Promise<any>
   onSuccess?: () => void
   onCancel?: () => void
@@ -49,16 +61,19 @@ export function ProductForm({
       name: '',
       category: 'General',
       sku: '',
-      costPrice: '',
-      sellingPrice: '',
-      openingStock: '',
+      productType: 'RESALE',
+      unitOfMeasure: 'pcs',
+      costPrice: '0',
+      defaultPurchaseCost: '',
+      standardProductionCost: '',
+      sellingPrice: '0',
+      openingStock: '0',
+      openingStockUnitCost: '',
       lowStockLevel: 5,
       notes: '',
       isActive: true,
+      costBreakdown: null,
       ...initial,
-      costBreakdown: initial?.costBreakdown
-        ? normalizeCostBreakdown(initial.costBreakdown as ProductCostBreakdown)
-        : null,
     },
   })
 
@@ -66,13 +81,41 @@ export function ProductForm({
     onDirtyChange?.(form.formState.isDirty)
   }, [form.formState.isDirty, onDirtyChange])
 
+  const productType = form.watch('productType') as ProductInput['productType']
+  const openingStock = Number(form.watch('openingStock') || 0)
+  const openingUnitCost = form.watch('openingStockUnitCost') as string
+  const openingValue = useMemo(
+    () => moneyNumber(openingUnitCost) * Math.max(0, openingStock),
+    [openingStock, openingUnitCost],
+  )
+  const sellingPrice = form.watch('sellingPrice') as string
+  const isService = productType === 'SERVICE'
+  const isManufactured = productType === 'MANUFACTURED'
+  const isResale = productType === 'RESALE'
+  const inventoryReadOnly = Boolean(initial?.inventoryCostReadOnly) || hideOpeningStock
+
+  useEffect(() => {
+    if (isService) {
+      form.setValue('openingStock', 0, { shouldValidate: true })
+      form.setValue('openingStockUnitCost', '', { shouldValidate: true })
+      form.setValue('lowStockLevel', 0, { shouldValidate: true })
+    }
+  }, [isService, form])
+
   const submit = (data: ProductInput) =>
     startTransition(async () => {
       const payload: ProductInput = {
         ...data,
-        costBreakdown: data.costBreakdown
-          ? normalizeCostBreakdown(data.costBreakdown as ProductCostBreakdown)
-          : null,
+        costBreakdown: data.costBreakdown ?? null,
+        // Map type-specific cost fields into costPrice for services / compatibility
+        costPrice:
+          data.productType === 'SERVICE'
+            ? data.costPrice || '0'
+            : data.costPrice || '0',
+        defaultPurchaseCost:
+          data.productType === 'RESALE'
+            ? data.defaultPurchaseCost || data.costPrice || '0'
+            : data.defaultPurchaseCost || '0',
       }
       const result = await onSubmit(payload)
       if (!result.success) {
@@ -89,39 +132,23 @@ export function ProductForm({
       router.refresh()
     })
 
-  const field = (label: string, name: keyof ProductInput, type = 'text') => (
-    <div className="space-y-2">
-      <Label htmlFor={String(name)}>{label}</Label>
-      {type === 'number' ? (
-        <NumberInput
-          id={String(name)}
-          integer
-          min={0}
-          placeholder="0"
-          value={form.watch(String(name)) as string | number | undefined}
-          onChange={(value) =>
-            form.setValue(String(name), value === '' ? '' : Number(value), {
-              shouldDirty: true,
-              shouldValidate: true,
-            })
-          }
-        />
-      ) : (
-        <Input id={String(name)} type={type} {...form.register(name as never)} />
-      )}
-      <p className="text-sm text-red-600" role="alert">
-        {String(form.formState.errors[name]?.message ?? '')}
-      </p>
-    </div>
-  )
-
-  const costBreakdown = form.watch('costBreakdown') as ProductCostBreakdown | null
-  const sellingPrice = form.watch('sellingPrice') as string
-
   return (
     <form onSubmit={form.handleSubmit(submit)} className={cn('space-y-5', className)}>
       <div className="grid gap-5 sm:grid-cols-2">
-        {field('Product name', 'name')}
+        <div className="space-y-2">
+          <Label htmlFor="name">Product name</Label>
+          <Input id="name" {...form.register('name')} />
+          <p className="text-sm text-red-600" role="alert">
+            {String(form.formState.errors.name?.message ?? '')}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="sku">SKU</Label>
+          <Input id="sku" {...form.register('sku')} />
+        </div>
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
           <select
@@ -134,42 +161,60 @@ export function ProductForm({
             ))}
           </select>
         </div>
-      </div>
-      <div className="grid gap-5 sm:grid-cols-2">
-        {field('SKU', 'sku')}
         <div className="space-y-2">
-          <Label>Active</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="productType">Product type</Label>
+            <FieldHelp
+              label="Product Type"
+              text="Resale products are bought and sold. Manufactured products get cost from the Product Cost Calculator. Services have no inventory."
+              guideHref="/help#products-and-inventory"
+            />
+          </div>
+          <select
+            id="productType"
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('productType')}
+          >
+            {PRODUCT_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Available for sale</Label>
           <label className="flex h-10 items-center gap-2 text-sm">
             <input type="checkbox" {...form.register('isActive')} />
             Available for sale
           </label>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="unitOfMeasure">Unit of measurement</Label>
+          <select
+            id="unitOfMeasure"
+            className="h-10 w-full rounded-md border bg-transparent px-3"
+            {...form.register('unitOfMeasure')}
+          >
+            {UNIT_OPTIONS.map((unit) => (
+              <option key={unit} value={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Label>Cost price</Label>
+            <Label>Default selling price</Label>
             <FieldHelp
-              label="Cost Price"
-              text="The total cost of producing or purchasing one unit."
-              guideHref="/help#product-costing"
-            />
-          </div>
-          <CurrencyInput
-            currency={currency}
-            value={form.watch('costPrice')}
-            onChange={(value) =>
-              form.setValue('costPrice', value, { shouldValidate: true, shouldDirty: true })
-            }
-          />
-          <p className="text-xs text-zinc-500">Inventory cost per unit</p>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5">
-            <Label>Selling price</Label>
-            <FieldHelp
-              label="Selling Price"
-              text="The amount charged to the customer for one unit."
+              label="Default Selling Price"
+              text="Suggested price for future sales. It can be changed on the invoice."
               guideHref="/help#product-costing"
             />
           </div>
@@ -180,66 +225,235 @@ export function ProductForm({
               form.setValue('sellingPrice', value, { shouldValidate: true, shouldDirty: true })
             }
           />
+          <p className="text-xs text-zinc-500">
+            Suggested price for future sales. It can be changed on the invoice.
+          </p>
+          <p className="text-sm text-red-600" role="alert">
+            {String(form.formState.errors.sellingPrice?.message ?? '')}
+          </p>
         </div>
-      </div>
 
-      <ProductCostCalculator
-        currency={currency}
-        value={costBreakdown}
-        sellingPrice={sellingPrice || ''}
-        defaultOpen={Boolean(initial?.costBreakdown)}
-        onChange={(breakdown) =>
-          form.setValue('costBreakdown', breakdown, { shouldDirty: true, shouldValidate: true })
-        }
-        onInventoryCostChange={(inventoryCostPerUnit) => {
-          if (form.getValues('costPrice') === inventoryCostPerUnit) return
-          form.setValue('costPrice', inventoryCostPerUnit, {
-            shouldValidate: true,
-            shouldDirty: true,
-          })
-        }}
-      />
-
-      <div className={cn('grid gap-5', hideOpeningStock ? '' : 'sm:grid-cols-2')}>
-        {hideOpeningStock ? null : (
+        {isService ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="openingStock">Opening stock</Label>
-              <FieldHelp
-                label="Opening Stock"
-                text={`The quantity available before starting to use ${APP_NAME}.`}
-                guideHref="/help#products-and-inventory"
-              />
-            </div>
-            <NumberInput
-              id="openingStock"
-              integer
-              min={0}
-              placeholder="0"
-              value={form.watch('openingStock') as string | number | undefined}
+            <Label>Direct service cost (optional)</Label>
+            <CurrencyInput
+              currency={currency}
+              value={form.watch('costPrice')}
               onChange={(value) =>
-                form.setValue('openingStock', value === '' ? '' : Number(value), {
-                  shouldDirty: true,
+                form.setValue('costPrice', value || '0', {
                   shouldValidate: true,
+                  shouldDirty: true,
                 })
               }
             />
-            <p className="text-sm text-red-600" role="alert">
-              {String(form.formState.errors.openingStock?.message ?? '')}
+            <p className="text-xs text-zinc-500">
+              Optional cost used for service profitability. Services have no stock.
             </p>
           </div>
-        )}
-        {field('Low stock alert level', 'lowStockLevel', 'number')}
+        ) : inventoryReadOnly ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label>Current inventory cost</Label>
+              <FieldHelp
+                label="Current Inventory Cost"
+                text="Used for inventory valuation and COGS. Historical sales retain their original cost."
+                guideHref="/help#product-costing"
+              />
+            </div>
+            <div className="flex h-10 items-center rounded-md border bg-zinc-50 px-3 text-sm">
+              <CurrencyDisplay value={initial?.costPrice || '0'} currency={currency} />
+            </div>
+            <p className="text-xs text-zinc-500">
+              Used for inventory valuation and COGS. Historical sales retain their original cost.
+            </p>
+          </div>
+        ) : null}
       </div>
-      {hideOpeningStock ? (
-        <p className="text-xs text-zinc-500">
-          Current stock is managed with Add Stock or Adjust Stock actions.
-        </p>
+
+      {isResale ? (
+        <section className="space-y-4 rounded-lg border border-zinc-200 p-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-900">Cost and opening stock</h3>
+            <p className="text-xs text-zinc-500">
+              Default purchase cost is a suggestion for future stock receipts. It does not revalue
+              existing inventory.
+            </p>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Default purchase cost</Label>
+              <CurrencyInput
+                currency={currency}
+                value={form.watch('defaultPurchaseCost') || form.watch('costPrice')}
+                onChange={(value) => {
+                  form.setValue('defaultPurchaseCost', value, {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                  form.setValue('costPrice', value || '0', { shouldDirty: true })
+                }}
+              />
+            </div>
+            {!hideOpeningStock ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="openingStock">Opening stock</Label>
+                  <NumberInput
+                    id="openingStock"
+                    integer
+                    min={0}
+                    placeholder="0"
+                    value={form.watch('openingStock') as string | number | undefined}
+                    onChange={(value) =>
+                      form.setValue('openingStock', value === '' ? 0 : Number(value), {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-red-600" role="alert">
+                    {String(form.formState.errors.openingStock?.message ?? '')}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Opening stock unit cost</Label>
+                  <CurrencyInput
+                    currency={currency}
+                    value={openingUnitCost}
+                    onChange={(value) =>
+                      form.setValue('openingStockUnitCost', value, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-red-600" role="alert">
+                    {String(form.formState.errors.openingStockUnitCost?.message ?? '')}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Opening stock value</Label>
+                  <div className="flex h-10 items-center rounded-md border bg-zinc-50 px-3 text-sm">
+                    <CurrencyDisplay value={openingValue} currency={currency} />
+                  </div>
+                  <p className="text-xs text-zinc-500">Quantity × unit cost (not an expense)</p>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </section>
       ) : null}
+
+      {isManufactured ? (
+        <section className="space-y-4 rounded-lg border border-teal-100 bg-teal-50/40 p-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-900">Production cost</h3>
+            <p className="text-xs text-zinc-600">
+              Cost will be calculated through Product Cost & Pricing. You can save this product with
+              zero cost, zero selling price, and zero opening stock.
+            </p>
+          </div>
+          {moneyNumber(initial?.standardProductionCost) > 0 ? (
+            <div className="space-y-1">
+              <Label>Standard production cost</Label>
+              <div className="flex h-10 items-center rounded-md border bg-white px-3 text-sm">
+                <CurrencyDisplay
+                  value={initial?.standardProductionCost || '0'}
+                  currency={currency}
+                />
+              </div>
+              <p className="text-xs text-zinc-500">
+                Suggested cost for future production batches. Does not revalue existing stock.
+              </p>
+            </div>
+          ) : null}
+          {!hideOpeningStock ? (
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="openingStockMfg">Opening stock</Label>
+                <NumberInput
+                  id="openingStockMfg"
+                  integer
+                  min={0}
+                  placeholder="0"
+                  value={form.watch('openingStock') as string | number | undefined}
+                  onChange={(value) =>
+                    form.setValue('openingStock', value === '' ? 0 : Number(value), {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                />
+              </div>
+              {openingStock > 0 ? (
+                <div className="space-y-2">
+                  <Label>Opening stock unit cost</Label>
+                  <CurrencyInput
+                    currency={currency}
+                    value={openingUnitCost}
+                    onChange={(value) =>
+                      form.setValue('openingStockUnitCost', value, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Opening value:{' '}
+                    <CurrencyDisplay value={openingValue} currency={currency} />
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <Button type="button" variant="secondary" asChild>
+            <Link
+              href={
+                initial?.id
+                  ? `/cost-pricing?productId=${initial.id}`
+                  : '/cost-pricing'
+              }
+            >
+              <Calculator className="h-4 w-4" />
+              Calculate Product Cost
+            </Link>
+          </Button>
+        </section>
+      ) : null}
+
+      {!isService ? (
+        <div className="space-y-2">
+          <Label htmlFor="lowStockLevel">Low-stock alert</Label>
+          <NumberInput
+            id="lowStockLevel"
+            integer
+            min={0}
+            placeholder="0"
+            value={form.watch('lowStockLevel') as string | number | undefined}
+            onChange={(value) =>
+              form.setValue('lowStockLevel', value === '' ? 0 : Number(value), {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+          {hideOpeningStock ? (
+            <p className="text-xs text-zinc-500">
+              Current stock is managed with Add Stock or Adjust Stock actions.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+          Services do not use opening stock, low-stock alerts, Add Stock, or inventory valuation.
+        </p>
+      )}
+
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" {...form.register('notes')} />
       </div>
+
       <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
         <Button
           type="button"

@@ -15,15 +15,26 @@ export type ProductRow = {
   name: string
   category: string
   sku: string | null
+  productType: 'RESALE' | 'MANUFACTURED' | 'SERVICE'
+  unitOfMeasure: string
   currentStock: number
   lowStockLevel: number
   openingStock: number
   costPrice: string
+  defaultPurchaseCost: string
+  standardProductionCost: string
   sellingPrice: string
   notes: string | null
   costBreakdown: ProductCostBreakdown | null
   isActive: boolean
   updatedAt: string
+  inventoryCostReadOnly?: boolean
+}
+
+const PRODUCT_TYPE_LABEL: Record<ProductRow['productType'], string> = {
+  RESALE: 'Resale',
+  MANUFACTURED: 'Manufactured',
+  SERVICE: 'Service',
 }
 
 export function ProductsTable({
@@ -54,15 +65,33 @@ export function ProductsTable({
         },
         { key: 'category', header: 'Category', cell: (p) => p.category },
         {
+          key: 'type',
+          header: 'Type',
+          cell: (p) => PRODUCT_TYPE_LABEL[p.productType] ?? p.productType,
+        },
+        {
           key: 'stock',
           header: 'Stock',
-          cell: (p) => (
-            <StockStatusBadge currentStock={p.currentStock} lowStockLevel={p.lowStockLevel} />
-          ),
+          cell: (p) =>
+            p.productType === 'SERVICE' ? (
+              <span className="text-zinc-400">—</span>
+            ) : (
+              <StockStatusBadge currentStock={p.currentStock} lowStockLevel={p.lowStockLevel} />
+            ),
+        },
+        {
+          key: 'invCost',
+          header: 'Inv. cost',
+          cell: (p) =>
+            p.productType === 'SERVICE' ? (
+              <CurrencyDisplay value={p.costPrice} currency={currency} />
+            ) : (
+              <CurrencyDisplay value={p.costPrice} currency={currency} />
+            ),
         },
         {
           key: 'price',
-          header: 'Price',
+          header: 'Sell price',
           cell: (p) => <CurrencyDisplay value={p.sellingPrice} currency={currency} />,
         },
         {

@@ -22,11 +22,17 @@ export default async function EditProductPage({
       <PageHeader title="Edit product" description="Update inventory information." />
       <ProductForm
         currency={profile.currency}
+        hideOpeningStock
         initial={{
+          id: p.id,
           name: p.name,
           category: p.category,
           sku: p.sku ?? '',
+          productType: p.productType,
+          unitOfMeasure: p.unitOfMeasure,
           costPrice: p.costPrice.toString(),
+          defaultPurchaseCost: p.defaultPurchaseCost.toString(),
+          standardProductionCost: p.standardProductionCost.toString(),
           sellingPrice: p.sellingPrice.toString(),
           openingStock: p.openingStock,
           currentStock: p.currentStock,
@@ -34,6 +40,7 @@ export default async function EditProductPage({
           notes: p.notes ?? '',
           isActive: p.isActive,
           costBreakdown: parseCostBreakdown(p.costBreakdown),
+          inventoryCostReadOnly: true,
         }}
         onSubmit={updateProductAction.bind(null, id)}
       />

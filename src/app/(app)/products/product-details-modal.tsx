@@ -86,17 +86,52 @@ export function ProductDetailsModal({
           <Item label="Current stock" value={String(product.currentStock)} />
           <Item label="Low-stock alert" value={String(product.lowStockLevel)} />
           <Item
-            label="Cost price"
+            label="Product type"
+            value={
+              product.productType === 'MANUFACTURED'
+                ? 'Manufactured'
+                : product.productType === 'SERVICE'
+                  ? 'Service'
+                  : 'Resale'
+            }
+          />
+          <Item
+            label={
+              product.productType === 'SERVICE'
+                ? 'Direct service cost'
+                : 'Current inventory cost'
+            }
             value={<CurrencyDisplay value={product.costPrice} currency={currency} />}
           />
           <Item
-            label="Selling price"
+            label="Default selling price"
             value={<CurrencyDisplay value={product.sellingPrice} currency={currency} />}
           />
-          <Item
-            label="Stock value"
-            value={<CurrencyDisplay value={stockValue} currency={currency} />}
-          />
+          {product.productType === 'SERVICE' ? null : (
+            <Item
+              label="Stock value"
+              value={<CurrencyDisplay value={stockValue} currency={currency} />}
+            />
+          )}
+          {product.productType === 'MANUFACTURED' ? (
+            <Item
+              label="Standard production cost"
+              value={
+                <CurrencyDisplay
+                  value={product.standardProductionCost}
+                  currency={currency}
+                />
+              }
+            />
+          ) : null}
+          {product.productType === 'RESALE' ? (
+            <Item
+              label="Default purchase cost"
+              value={
+                <CurrencyDisplay value={product.defaultPurchaseCost} currency={currency} />
+              }
+            />
+          ) : null}
           <Item
             label="Last stock update"
             value={product.updatedAt ? formatDate(product.updatedAt) : '—'}
